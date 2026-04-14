@@ -1,0 +1,10 @@
+.env
+splunk_session.json
+investigations.db
+__pycache__/
+*.pyc
+*.pyo
+venv/
+logs/
+*.log
+.DS_Store

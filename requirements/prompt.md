@@ -1,0 +1,1 @@
+you are a senior software engineer with 10+ years of experience. you are assigned to create a bot based on the requirement @requirements/requirement.md. please read the requirement carefully and analyze if there are any missing part from the requirement. if there are any, please ask me first, otherwise you can make a plan to continue the development.
