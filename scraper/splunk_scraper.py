@@ -76,14 +76,29 @@ async def scrape_splunk(transaction_id: str, environment: str = "prod") -> tuple
         return ("success", log_lines)
 
     except PlaywrightError as e:
-        logger.error("Playwright error for transaction_id=%s: %s", transaction_id, e)
+        logger.error(
+            "Playwright error for transaction_id=%s: [%s] %s",
+            transaction_id, type(e).__name__, e,
+        )
         if browser_manager.can_restart:
             restarted = await browser_manager.restart()
             if restarted:
                 return ("browser_restarted", None)
+        logger.error(
+            "Browser unrecoverable for transaction_id=%s. "
+            "Restart attempts: %d/%d, Can restart: %s, Error type: %s",
+            transaction_id,
+            browser_manager.restart_count,
+            browser_manager._max_restarts,
+            browser_manager.can_restart,
+            type(e).__name__,
+        )
         return ("browser_error", None)
     except Exception as e:
-        logger.exception("Unexpected error scraping Splunk for transaction_id=%s", transaction_id)
+        logger.exception(
+            "Unexpected error scraping Splunk for transaction_id=%s: [%s] %s",
+            transaction_id, type(e).__name__, e,
+        )
         return ("error", None)
     finally:
         if page and not page.is_closed():

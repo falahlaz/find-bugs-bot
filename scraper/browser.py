@@ -1,5 +1,6 @@
-import os
+import asyncio
 import logging
+import os
 
 from playwright.async_api import async_playwright, Browser, BrowserContext
 
@@ -15,7 +16,8 @@ class BrowserManager:
         self._context: BrowserContext | None = None
         self.session_file_path: str | None = None
         self._restart_attempts = 0
-        self._max_restarts = 1
+        self._max_restarts = 3
+        self._restart_delay = 2
 
     async def start(self):
         self._playwright = await async_playwright().start()
@@ -47,15 +49,17 @@ class BrowserManager:
         return await self._context.new_page()
 
     async def restart(self) -> bool:
-        logger.warning("Attempting browser restart...")
+        logger.warning("Attempting browser restart (attempt %d/%d)...", self._restart_attempts + 1, self._max_restarts)
         try:
             await self.close_context()
+            logger.info("Waiting %ds before relaunching browser...", self._restart_delay)
+            await asyncio.sleep(self._restart_delay)
             await self._launch_browser()
-            logger.info("Browser restarted successfully")
+            logger.info("Browser restarted successfully (attempt %d)", self._restart_attempts + 1)
             self._restart_attempts += 1
             return True
         except Exception:
-            logger.exception("Browser restart failed")
+            logger.exception("Browser restart failed (attempt %d/%d)", self._restart_attempts + 1, self._max_restarts)
             return False
 
     async def close_context(self):
