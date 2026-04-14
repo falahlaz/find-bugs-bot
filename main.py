@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CommandHandler
 
 import config
-from bot.handler import help_command, status_command, history_command, handle_message, make_env_command
+from bot.handler import help_command, status_command, history_command, handle_message, make_env_command, make_time_range_command
 from jobqueue.job_queue import job_queue
 from scraper.browser import browser_manager
 from scraper.vpn_check import is_vpn_connected
@@ -52,7 +52,8 @@ async def process_job(job: dict, bot):
     transaction_id = job["transaction_id"]
     requester_chat_id = job["requester_chat_id"]
     environment = job.get("environment", "prod")
-    logging.info("Starting job for transaction_id=%s environment=%s", transaction_id, environment)
+    time_range = job.get("time_range", config.SPLUNK_DEFAULT_TIME_RANGE)
+    logging.info("Starting job for transaction_id=%s environment=%s time_range=%s", transaction_id, environment, time_range)
 
     try:
         vpn_ok = await is_vpn_connected()
@@ -92,7 +93,7 @@ async def process_job(job: dict, bot):
                 )
                 return
 
-        result_status, log_data = await scrape_splunk(transaction_id, environment)
+        result_status, log_data = await scrape_splunk(transaction_id, environment, time_range)
 
         if result_status == "session_expired":
             logging.error("Splunk session expired, pausing queue")
@@ -118,7 +119,7 @@ async def process_job(job: dict, bot):
 
         if result_status == "browser_restarted":
             logging.warning("Browser restarted, retrying job for transaction_id=%s", transaction_id)
-            result_status, log_data = await scrape_splunk(transaction_id, environment)
+        result_status, log_data = await scrape_splunk(transaction_id, environment, time_range)
 
         if result_status == "browser_error" or result_status == "error":
             logging.error("Browser unrecoverable for transaction_id=%s", transaction_id)
@@ -149,12 +150,14 @@ async def process_job(job: dict, bot):
                 requester_chat_id=requester_chat_id,
                 environment=environment,
                 status="no_logs",
+                time_range=time_range,
             )
             qa_msgs = format_qa_report(
                 transaction_id=transaction_id,
                 diagnosis=None,
                 environment=environment,
                 status="no_logs",
+                time_range=time_range,
             )
             for msg in eng_msgs:
                 await bot.send_message(chat_id=config.TELEGRAM_YOUR_CHAT_ID, text=msg, parse_mode="Markdown")
@@ -166,6 +169,7 @@ async def process_job(job: dict, bot):
                 environment=environment,
                 status="no_logs",
                 raw_log_snippet=log_data,
+                time_range=time_range,
             )
             return
 
@@ -182,6 +186,7 @@ async def process_job(job: dict, bot):
                 environment=environment,
                 status="failed",
                 failure_reason=f"Unexpected scraper status: {result_status}",
+                time_range=time_range,
             )
             return
 
@@ -209,6 +214,7 @@ async def process_job(job: dict, bot):
             llm_failed=llm_failed,
             llm_raw_text=llm_raw_text,
             status="success" if not llm_failed else "failed",
+            time_range=time_range,
         )
         qa_msgs = format_qa_report(
             transaction_id=transaction_id,
@@ -216,6 +222,7 @@ async def process_job(job: dict, bot):
             environment=environment,
             status="success" if not llm_failed else "failed",
             llm_failed=llm_failed,
+            time_range=time_range,
         )
 
         for msg in eng_msgs:
@@ -236,6 +243,7 @@ async def process_job(job: dict, bot):
             suggested_action=diagnosis.get("suggested_action") if diagnosis else None,
             raw_log_snippet=log_data,
             failure_reason="LLM analysis failed" if llm_failed else None,
+            time_range=time_range,
         )
 
     except Exception:
@@ -297,6 +305,9 @@ def main():
 
     for env_key in config.SPLUNK_ENVIRONMENTS:
         application.add_handler(CommandHandler(env_key, make_env_command(env_key)))
+
+    for tr_key in config.SPLUNK_TIME_RANGES:
+        application.add_handler(CommandHandler(tr_key, make_time_range_command(tr_key)))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

@@ -35,6 +35,18 @@ def make_env_command(env_key: str):
     return _env_handler
 
 
+def make_time_range_command(tr_key: str):
+    async def _tr_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        time_range = config.SPLUNK_TIME_RANGES[tr_key]
+        context.user_data["time_range"] = time_range
+        await update.message.reply_text(
+            f"✅ Time range set to **last {time_range}**.",
+            parse_mode="Markdown",
+        )
+    _tr_handler.__name__ = f"time_range_{tr_key}"
+    return _tr_handler
+
+
 def _env_commands_help() -> str:
     commands = []
     for env in config.SPLUNK_ENVIRONMENTS:
@@ -45,12 +57,15 @@ def _env_commands_help() -> str:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     env_cmds = _env_commands_help()
+    tr_cmds = "\n".join(f"`/{k}` — set time range to last {v}" for k, v in config.SPLUNK_TIME_RANGES.items())
     text = (
         "🐛 *Debug Bot Help*\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "1. Select an environment:\n"
         f"{env_cmds}\n\n"
-        "2. Send your transaction ID (the value of the "
+        "2. Set time range (default: last 24h):\n"
+        f"{tr_cmds}\n\n"
+        "3. Send your transaction ID (the value of the "
         f"`{config.TRANSACTION_ID_HEADER}` header).\n\n"
         "Examples:\n"
         "`abc-123`\n"
@@ -186,6 +201,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
+    time_range = context.user_data.get("time_range", config.SPLUNK_DEFAULT_TIME_RANGE)
+
     is_curl = text.lower().startswith("curl") or (
         "-h " in text.lower() and "http" in text.lower()
     )
@@ -224,6 +241,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "raw_curl": text,
         "vpn_retries": 0,
         "environment": environment,
+        "time_range": time_range,
     }
 
     enqueued = await jq.enqueue(job)
@@ -234,7 +252,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     await update.message.reply_text(
-        f"✅ Received. Investigating `{transaction_id}` in **{_env_display(environment)}**...",
+        f"✅ Received. Investigating `{transaction_id}` in **{_env_display(environment)}** (last {time_range})...",
         parse_mode="Markdown",
     )
     logger.info(

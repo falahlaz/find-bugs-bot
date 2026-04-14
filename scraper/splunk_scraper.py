@@ -13,13 +13,13 @@ SPLUNK_RESULTS_CONTAINER = 'div[data-test="results-container"], div.results-tabl
 SPLUNK_SSO_INDICATOR = config.SPLUNK_SSO_DOMAIN
 
 
-async def scrape_splunk(transaction_id: str, environment: str = "prod") -> tuple[str, str | None]:
+async def scrape_splunk(transaction_id: str, environment: str = "prod", time_range: str = "24h") -> tuple[str, str | None]:
     template = config.SPLUNK_SPL_TEMPLATES.get(environment)
     if template is None:
         logger.error("Unknown environment: %s. Available: %s", environment, list(config.SPLUNK_SPL_TEMPLATES.keys()))
         return ("error", None)
-    spl_query = template.format(transaction_id=transaction_id)
-    logger.info("Scraping Splunk for transaction_id=%s environment=%s", transaction_id, environment)
+    spl_query = template.format(transaction_id=transaction_id) + f" earliest=-{time_range}"
+    logger.info("Scraping Splunk for transaction_id=%s environment=%s time_range=%s", transaction_id, environment, time_range)
 
     page = None
     try:
@@ -40,7 +40,7 @@ async def scrape_splunk(transaction_id: str, environment: str = "prod") -> tuple
             logger.info("Typed SPL query: %s", spl_query[:80])
         except Exception:
             search_input = page.locator("textarea").first
-            await search_input.click()
+            await search_input.focus()
             await page.keyboard.press("Control+a")
             await page.keyboard.press("Backspace")
             await search_input.type(spl_query, delay=30)

@@ -1,6 +1,7 @@
 import json
 import logging
 
+import httpx
 from openai import AsyncOpenAI
 
 import config
@@ -39,7 +40,8 @@ class LLMAnalysisError(Exception):
 
 
 async def analyze(transaction_id: str, log_lines: str) -> dict:
-    client = AsyncOpenAI(api_key=config.LLM_API_KEY)
+    http_client = httpx.AsyncClient(verify=not config.LLM_SKIP_SSL_VERIFY)
+    client = AsyncOpenAI(api_key=config.LLM_API_KEY, http_client=http_client)
 
     user_prompt = USER_PROMPT_TEMPLATE.format(
         transaction_id=transaction_id,

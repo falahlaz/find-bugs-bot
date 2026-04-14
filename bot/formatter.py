@@ -8,6 +8,14 @@ ENV_DISPLAY_NAMES = {
     "dev": "development",
 }
 
+MARKDOWN_SPECIAL_CHARS = ("_", "*", "[", "`", ">", "-", "+", ".")
+
+
+def _escape_markdown(text: str) -> str:
+    for char in MARKDOWN_SPECIAL_CHARS:
+        text = text.replace(char, f"\\{char}")
+    return text
+
 
 def _env_display(env_key: str) -> str:
     return ENV_DISPLAY_NAMES.get(env_key, env_key)
@@ -29,9 +37,10 @@ def format_engineer_report(
     llm_raw_text: str | None = None,
     status: str = "success",
     failure_reason: str | None = None,
+    time_range: str = "24h",
 ) -> list[str]:
     env_label = _env_display(environment)
-    header = f"🐛 Bug Report — transaction-id: `{transaction_id}` [{env_label}]"
+    header = f"🐛 Bug Report — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]"
 
     if status == "no_logs":
         text = (
@@ -52,7 +61,7 @@ def format_engineer_report(
             f"❌ Investigation failed\n\n"
         )
         if failure_reason:
-            text += f"Reason: {failure_reason}\n\n"
+            text += f"Reason: {_escape_markdown(failure_reason)}\n\n"
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
             text += f"⚠️ Last ~3000 chars of logs:\n```\n{snippet}\n```\n\n"
@@ -67,7 +76,7 @@ def format_engineer_report(
             f"{header}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "⚠️ LLM analysis failed — raw response below:\n\n"
-            f"{llm_raw_text}\n\n"
+            f"{_escape_markdown(llm_raw_text)}\n\n"
         )
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
@@ -83,13 +92,13 @@ def format_engineer_report(
     text = (
         f"{header}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📍 Failed component:  {d.get('failed_component', '—')}\n"
-        f"❌ Error type:        {d.get('error_type', '—')}\n"
-        f"🔍 Likely cause:      {d.get('likely_cause', '—')}\n"
+        f"📍 Failed component:  {_escape_markdown(d.get('failed_component', '—'))}\n"
+        f"❌ Error type:        {_escape_markdown(d.get('error_type', '—'))}\n"
+        f"🔍 Likely cause:      {_escape_markdown(d.get('likely_cause', '—'))}\n"
         f"{sev_icon} Severity:          {sev.title()}\n"
-        f"💡 Suggested action:  {d.get('suggested_action', '—')}\n"
+        f"💡 Suggested action:  {_escape_markdown(d.get('suggested_action', '—'))}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 Summary:\n{d.get('summary', '—')}\n\n"
+        f"📋 Summary:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
         f"👤 Reported by: chat_id {requester_chat_id}\n"
         f"🕐 Queried at: {_now_formatted()}"
     )
@@ -104,12 +113,13 @@ def format_qa_report(
     status: str = "success",
     llm_failed: bool = False,
     failure_reason: str | None = None,
+    time_range: str = "24h",
 ) -> list[str]:
     env_label = _env_display(environment)
 
     if status == "no_logs":
         text = (
-            f"📭 No logs found for transaction-id: `{transaction_id}` [{env_label}]\n\n"
+            f"📭 No logs found for transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
             "No logs were found in Splunk for your transaction ID. "
             "The engineering team has been notified and may follow up."
         )
@@ -118,24 +128,24 @@ def format_qa_report(
     if status == "failed":
         if failure_reason and "VPN" in failure_reason:
             text = (
-                f"❌ Investigation failed for transaction-id: `{transaction_id}` [{env_label}]\n\n"
+                f"❌ Investigation failed for transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
                 "VPN connectivity issue — please resubmit when the team is available."
             )
         elif failure_reason and "session" in failure_reason.lower():
             text = (
-                f"⏸️ Investigation paused for transaction-id: `{transaction_id}` [{env_label}]\n\n"
+                f"⏸️ Investigation paused for transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
                 "The engineering team has been notified and will resume shortly."
             )
         else:
             text = (
-                f"❌ Investigation failed for transaction-id: `{transaction_id}` [{env_label}]\n\n"
+                f"❌ Investigation failed for transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
                 "Something went wrong. The engineering team has been notified."
             )
         return _split_message(text)
 
     if llm_failed:
         text = (
-            f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}]\n\n"
+            f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
             "The engineering team is reviewing the logs manually and will follow up."
         )
         return _split_message(text)
@@ -145,9 +155,9 @@ def format_qa_report(
     sev = d.get("severity", "unknown").lower()
 
     text = (
-        f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}]\n\n"
+        f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
         f"{severity_emoji.get(sev, '❓')} Severity: {sev.title()}\n"
-        f"📋 What happened:\n{d.get('summary', '—')}\n\n"
+        f"📋 What happened:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
         "The engineering team has been notified and is looking into it."
     )
     return _split_message(text)
