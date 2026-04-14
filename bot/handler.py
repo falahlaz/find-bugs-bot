@@ -17,6 +17,17 @@ def _env_display(env_key: str) -> str:
     return ENV_DISPLAY_NAMES.get(env_key, env_key)
 
 
+MAX_TXN_ID_LEN = 128
+
+
+def _looks_like_transaction_id(text: str) -> bool:
+    if not text or len(text) > MAX_TXN_ID_LEN:
+        return False
+    if any(c in text for c in "\n\r\t"):
+        return False
+    return True
+
+
 def make_env_command(env_key: str):
     async def _env_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _set_environment(update, context, env_key)
@@ -39,12 +50,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "━━━━━━━━━━━━━━━━━━━\n"
         "1. Select an environment:\n"
         f"{env_cmds}\n\n"
-        "2. Send a `curl` command containing the "
-        f"`{config.TRANSACTION_ID_HEADER}` header.\n\n"
-        "Example:\n"
+        "2. Send your transaction ID (the value of the "
+        f"`{config.TRANSACTION_ID_HEADER}` header).\n\n"
+        "Examples:\n"
+        "`abc-123`\n"
+        "`ABC-123-XYZ`\n\n"
+        "Or paste a full curl command:\n"
         f"`curl -H \"{config.TRANSACTION_ID_HEADER}: abc-123\" https://api.example.com`\n\n"
         "The bot will:\n"
-        " • Extract the transaction ID\n"
         " • Search Splunk for logs in the selected environment\n"
         " • Analyze with AI\n"
         " • Send you a diagnosis\n\n"
@@ -61,7 +74,7 @@ async def _set_environment(update: Update, context: ContextTypes.DEFAULT_TYPE, e
     display = _env_display(env_key)
     await update.message.reply_text(
         f"✅ Environment set to **{display}** (`/{env_key}`).\n"
-        "Now send your curl command.",
+        "Now send your transaction ID (or curl command).",
         parse_mode="Markdown",
     )
 
@@ -168,7 +181,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(
             "⚠️ Please select an environment first:\n"
             f"{env_list}\n\n"
-            "Then send your curl command.",
+            "Then send your transaction ID (or curl command).",
             parse_mode="Markdown",
         )
         return
@@ -177,24 +190,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "-h " in text.lower() and "http" in text.lower()
     )
 
-    if not is_curl:
-        await update.message.reply_text(
-            "That doesn't look like a valid curl command. Please paste the full curl command.\n\n"
-            f"Example: `curl -H \"{config.TRANSACTION_ID_HEADER}: abc-123\" https://api.example.com`\n\n"
-            "Type /help for more info.",
-            parse_mode="Markdown",
-        )
-        return
+    if is_curl:
+        from parser.curl_parser import parse_curl, CurlParseError
 
-    from parser.curl_parser import parse_curl, CurlParseError
-
-    try:
-        parsed = parse_curl(text)
-    except CurlParseError as e:
-        await update.message.reply_text(str(e))
-        return
-
-    transaction_id = parsed["transaction_id"]
+        try:
+            parsed = parse_curl(text)
+            transaction_id = parsed["transaction_id"]
+        except CurlParseError as e:
+            await update.message.reply_text(str(e))
+            return
+    else:
+        txn_candidate = text.strip()
+        if _looks_like_transaction_id(txn_candidate):
+            transaction_id = txn_candidate
+        else:
+            await update.message.reply_text(
+                "That doesn't look like a valid transaction ID or curl command. "
+                f"Please paste your `{config.TRANSACTION_ID_HEADER}` value or a full curl command.\n\n"
+                "Example transaction ID: `abc-123`\n"
+                "Type /help for more info.",
+                parse_mode="Markdown",
+            )
+            return
 
     jq = context.bot_data.get("job_queue")
     if not jq:
