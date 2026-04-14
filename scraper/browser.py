@@ -37,6 +37,7 @@ class BrowserManager:
         self._context = await self._browser.new_context(
             storage_state=storage_state,
             viewport={"width": 1280, "height": 720},
+            ignore_https_errors=True,
         )
         self._restart_attempts = 0
 

@@ -9,7 +9,7 @@ from telegram.ext import Application, MessageHandler, filters, CommandHandler
 
 import config
 from bot.handler import help_command, status_command, history_command, handle_message, make_env_command
-from queue.job_queue import job_queue
+from jobqueue.job_queue import job_queue
 from scraper.browser import browser_manager
 from scraper.vpn_check import is_vpn_connected
 from scraper.splunk_scraper import scrape_splunk

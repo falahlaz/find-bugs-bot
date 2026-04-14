@@ -13,7 +13,7 @@ def save_session():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        context = browser.new_context(viewport={"width": 1280, "height":  720})
+        context = browser.new_context(viewport={"width": 1280, "height": 720}, ignore_https_errors=True)
         page = context.new_page()
 
         page.goto(config.SPLUNK_URL)
