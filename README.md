@@ -1,6 +1,6 @@
 # Debug Bot — Telegram Splunk Debugging Bot
 
-A Telegram bot that accepts curl snippets from QA, searches Splunk automatically, and delivers an AI-summarized diagnosis to you on Telegram.
+A Telegram bot that accepts curl snippets from QA, searches Splunk automatically (across multiple environments), and delivers an AI-summarized diagnosis to you on Telegram.
 
 ## Requirements
 
@@ -40,6 +40,8 @@ TELEGRAM_ALLOWED_CHAT_IDS=chat_id_1,chat_id_2,chat_id_3
 
 # Splunk
 SPLUNK_URL=https://your-splunk-instance.example.com
+# JSON object mapping environment names to SPL templates. Must be valid JSON on a single line.
+# {transaction_id} is replaced at query time. Environments sharing the same index reuse the same template.
 SPLUNK_SPL_TEMPLATES={"prod":"index=\"your_prod_index\" \"{transaction_id}\"","dev":"index=\"your_preprod_index\" \"{transaction_id}\"","staging":"index=\"your_preprod_index\" \"{transaction_id}\"","uat":"index=\"your_preprod_index\" \"{transaction_id}\""}
 SPLUNK_SESSION_PATH=splunk_session.json
 SPLUNK_RESULT_WAIT_TIMEOUT=30
@@ -176,31 +178,62 @@ The bot will:
 ## Architecture
 
 ```
-QA sends curl → Telegram Bot → Curl Parser → Job Queue (FIFO, max 10)
-                                                      ↓
-                                              VPN Check
-                                                      ↓
-                                              Splunk Scraper (Playwright)
-                                                      ↓
-                                              LLM Analyzer (OpenAI)
-                                                      ↓
-                                        ┌─────────────┴──────────────┐
-                                        ↓                             ↓
-                                  Engineer (full report)      QA (simplified)
-                                        ↓
-                                  SQLite (investigations.db)
+QA selects env (/prod, /dev, etc.)
+      │
+      │  sends raw curl snippet
+      ▼
+┌─────────────────────┐
+│   Telegram Bot      │  checks: private chat? allowlisted? env set?
+│   (message handler) │
+└────────┬────────────┘
+         │ extract transaction-id + environment
+         ▼
+┌─────────────────────┐
+│   Curl Parser       │  extracts headers, url, method
+└────────┬────────────┘
+         │ enqueue job with environment
+         ▼
+┌─────────────────────┐
+│   Asyncio Job Queue │  FIFO, one worker at a time, max 10
+│   + Graceful Drain  │
+└────────┬────────────┘
+         │ dequeue
+         ▼
+┌─────────────────────┐        ┌──────────────────────┐
+│   Splunk Scraper    │───────▶│  Splunk (web browser) │
+│   (Playwright)      │◀───────│  via Global Protect   │
+│   uses env-specific │        └──────────────────────┘
+│   SPL template      │
+└────────┬────────────┘
+         │ raw log lines
+         ▼
+┌─────────────────────┐        ┌──────────────────────┐
+│   LLM Analyzer      │───────▶│  OpenAI API           │
+│                     │◀───────│  (e.g. gpt-4o)        │
+└────────┬────────────┘        └──────────────────────┘
+         │ structured diagnosis
+         ▼
+┌─────────────────────┐
+│   Report Formatter  │
+│   + Dual Delivery   │──────▶ QA: simplified summary [dev]
+│   + SQLite Writer    │──────▶ You: full technical report [prod]
+└────────┬────────────┘
+         │
+         ▼
+   investigations.db  (local SQLite)
 ```
 
 ## Error Handling
 
 | Scenario | Engineer gets | QA gets |
 |---|---|---|
+| No environment selected | — | "⚠️ Please select an environment first: /prod, /dev, /staging, /uat" |
 | Invalid curl | — | Error message with format hint |
 | Missing transaction ID header | — | "Could not find X-Transaction-ID header" |
 | Queue full (10 jobs) | — | "Bot is busy, please retry" |
 | VPN down (3 retries) | "❌ Job abandoned after 3 VPN retries" | "Investigation failed — VPN issue" |
 | Splunk session expired | "🔐 Session expired. Run save_session.py" | "Investigation paused" |
-| No logs found | "No logs found for transaction ID" | "No logs found" |
+| No logs found | "No logs found for transaction ID [env]" | "No logs found" |
 | LLM API error | Raw logs (truncated 3000 chars) + error note | "Engineer is reviewing" |
 | Browser crash | "🚨 Browser crashed. Restart the bot." | "Technical issue on our end" |
 
