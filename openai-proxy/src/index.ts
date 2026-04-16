@@ -22,7 +22,7 @@ export default {
     const upstreamReq = new Request(upstreamUrl, {
       method: request.method,
       headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.text(),
+      body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.text(),
     });
 
     const upstreamRes = await fetch(upstreamReq);
