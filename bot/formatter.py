@@ -123,6 +123,14 @@ def format_engineer_report(
         f"{sev_icon} Severity:          {sev.title()}\n"
         f"💡 Suggested action:  {_escape_markdown(d.get('suggested_action', '—'))}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+
+    relevant_logs = d.get("relevant_logs", [])
+    if relevant_logs:
+        logs_text = "\n".join(f"  {i+1}. `{line}`" for i, line in enumerate(relevant_logs))
+        text += f"📄 Relevant logs:\n{logs_text}\n\n"
+
+    text += (
         f"📋 Summary:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
         f"👤 Reported by: chat_id {requester_chat_id}\n"
         f"🕐 Queried at: {_now_formatted()}"

@@ -15,7 +15,7 @@ from scraper.splunk_api import splunk_api
 from scraper.vpn_check import is_vpn_connected
 from scraper.splunk_scraper import scrape_splunk
 from analyzer.llm_analyzer import analyze, LLMAnalysisError, close_client
-from bot.formatter import format_engineer_report, format_qa_report, format_raw_log_message
+from bot.formatter import format_engineer_report, format_qa_report
 from storage.database import save_investigation
 
 shutting_down = False
@@ -215,11 +215,6 @@ async def process_job(job: dict, bot):
             await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
         for msg in qa_msgs:
             await send_message_safe(bot, requester_chat_id, text=msg)
-
-        if log_data and not llm_failed:
-            raw_msgs = format_raw_log_message(transaction_id, environment, time_range, log_data)
-            for msg in raw_msgs:
-                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
 
         await save_investigation(
             transaction_id=transaction_id,

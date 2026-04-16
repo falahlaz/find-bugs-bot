@@ -240,7 +240,7 @@ class SplunkAPIClient:
                 "count": config.MAX_LOG_LINES,
                 "field_list": "_raw,_time,source,sourcetype,host",
                 "max_lines": 0,
-                "segmentation": "raw",
+                "segmentation": "none",
             },
         )
 
@@ -258,13 +258,18 @@ class SplunkAPIClient:
         lines = []
         for event in results:
             raw = event.get("_raw", "")
+            if isinstance(raw, dict) and "value" in raw:
+                raw = raw["value"]
             if raw:
                 timestamp = event.get("_time", "")
+                if isinstance(timestamp, dict) and "value" in timestamp:
+                    timestamp = timestamp["value"]
                 if timestamp and timestamp != "0":
                     lines.append(f"[{timestamp}] {raw}")
                 else:
                     lines.append(raw)
 
+        logger.debug("_get_events: %d results -> %d log lines", len(results), len(lines))
         return "\n".join(lines)
 
     async def _cleanup_job(self, sid: str):

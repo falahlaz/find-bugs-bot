@@ -45,9 +45,14 @@ def _sanitize_log_lines(log_lines: str, max_chars: int = 80000) -> str:
         sanitized = sanitized[:max_chars] + f"\n... [truncated {len(log_lines) - max_chars} chars]"
     return sanitized
 
+
 SYSTEM_PROMPT = """You are a backend debugging assistant for a software engineering team.
 You will receive raw application logs from a production system, identified by a transaction ID.
-Your job is to analyze what went wrong and explain it clearly to the backend engineer who will fix it.
+Your job is to:
+1. Identify the log lines that are most relevant to the error or failure (error-level logs, exception traces, failed API calls, validation failures)
+2. Provide a diagnosis based on those relevant logs
+3. Explain it clearly to the backend engineer who will fix it
+
 Be precise, technical, and concise. Do not speculate beyond what the logs show.
 
 If the logs contain ESB (Enterprise Service Bus) errors:
@@ -56,26 +61,31 @@ If the logs contain ESB (Enterprise Service Bus) errors:
 - Include the full ESB response body in the "likely_cause" field
 - Include the HTTP status code and any correlation IDs in the "suggested_action" field"""
 
-USER_PROMPT_TEMPLATE = """Transaction ID: {transaction_id}
+_USER_PROMPT_TEMPLATE = (
+    "Transaction ID: {transaction_id}\n"
+    "\n"
+    "Raw logs:\n"
+    "---\n"
+    "{log_lines}\n"
+    "---\n"
+    "\n"
+    "Analyze the logs above and respond in the following JSON format only, no other text:\n"
+    "\n"
+    "{{\n"
+    '  "summary": "one or two sentence description of what happened",\n'
+    '  "error_type": "e.g. NullPointerException, TimeoutError, 404, etc.",\n'
+    '  "failed_component": "the service, class, function, or endpoint where it failed",\n'
+    '  "likely_cause": "your best diagnosis of root cause based on the logs",\n'
+    '  "severity": "low | medium | high | critical",\n'
+    '  "suggested_action": "specific next step the engineer should take",\n'
+    '  "relevant_logs": ["exact log line 1", "exact log line 2", ...]\n'
+    "}}\n"
+    "\n"
+    "In \"relevant_logs\", include ONLY the exact log lines (verbatim from the raw logs) that are most critical to understanding the error — error-level logs, exceptions, failed calls, validation failures. Max 10 lines. Do not paraphrase or rewrite them.\n"
+    'If no relevant logs are found (e.g. only info-level logs with no errors), set relevant_logs to an empty array [] and set likely_cause to "Insufficient log detail".'
+)
 
-Raw logs:
----
-{log_lines}
----
-
-Analyze the logs above and respond in the following JSON format only, no other text:
-
-{{
-  "summary": "one or two sentence description of what happened",
-  "error_type": "e.g. NullPointerException, TimeoutError, 404, etc.",
-  "failed_component": "the service, class, function, or endpoint where it failed",
-  "likely_cause": "your best diagnosis of root cause based on the logs",
-  "severity": "low | medium | high | critical",
-  "suggested_action": "specific next step the engineer should take"
-}}
-
-If the logs do not contain enough information to diagnose the issue, set likely_cause to
-"Insufficient log detail" and suggest what additional logging would help."""
+USER_PROMPT_TEMPLATE = _USER_PROMPT_TEMPLATE
 
 
 class LLMAnalysisError(Exception):
@@ -114,7 +124,7 @@ async def analyze(transaction_id: str, log_lines: str) -> dict:
         logger.warning("LLM returned malformed JSON for transaction_id=%s", transaction_id)
         raise LLMAnalysisError(f"Malformed JSON response: {content}")
 
-    required_fields = {"summary", "error_type", "failed_component", "likely_cause", "severity", "suggested_action"}
+    required_fields = {"summary", "error_type", "failed_component", "likely_cause", "severity", "suggested_action", "relevant_logs"}
     if not required_fields.issubset(diagnosis.keys()):
         logger.warning("LLM response missing fields for transaction_id=%s: %s", transaction_id, diagnosis)
 
