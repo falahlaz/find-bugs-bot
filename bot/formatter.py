@@ -8,13 +8,23 @@ ENV_DISPLAY_NAMES = {
     "dev": "development",
 }
 
-MARKDOWN_SPECIAL_CHARS = ("_", "*", "[", "`", ">", "-", "+", ".")
+MARKDOWN_SPECIAL_CHARS = ("_", "*", "[", "`", ">", "+")
 
 
 def _escape_markdown(text: str) -> str:
     for char in MARKDOWN_SPECIAL_CHARS:
         text = text.replace(char, f"\\{char}")
     return text
+
+
+def _sanitize_code_block(text: str) -> str:
+    return text.replace("```", "'''")
+
+
+def _truncate_error(text: str, max_len: int = 500) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
 
 
 def _env_display(env_key: str) -> str:
@@ -58,13 +68,13 @@ def format_engineer_report(
         text = (
             f"{header}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"❌ Investigation failed\n\n"
+            "❌ Investigation failed\n\n"
         )
         if failure_reason:
             text += f"Reason: {_escape_markdown(failure_reason)}\n\n"
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
-            text += f"⚠️ Last ~3000 chars of logs:\n```\n{snippet}\n```\n\n"
+            text += f"⚠️ Last ~3000 chars of logs:\n```\n{_sanitize_code_block(snippet)}\n```\n\n"
         text += f"👤 Reported by: chat_id {requester_chat_id}\n"
         text += f"🕐 Queried at: {_now_formatted()}"
         return _split_message(text)
@@ -72,15 +82,16 @@ def format_engineer_report(
     severity_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}
 
     if llm_failed and llm_raw_text:
+        safe_error = _truncate_error(llm_raw_text, 500)
         text = (
             f"{header}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ LLM analysis failed — raw response below:\n\n"
-            f"{_escape_markdown(llm_raw_text)}\n\n"
+            "⚠️ LLM analysis failed\n\n"
+            f"```\n{_sanitize_code_block(safe_error)}\n```\n\n"
         )
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
-            text += f"📄 Raw logs (last ~3000 chars):\n```\n{snippet}\n```\n\n"
+            text += f"📄 Raw logs (last ~3000 chars):\n```\n{_sanitize_code_block(snippet)}\n```\n\n"
         text += f"👤 Reported by: chat_id {requester_chat_id}\n"
         text += f"🕐 Queried at: {_now_formatted()}"
         return _split_message(text)
@@ -180,7 +191,14 @@ def _split_message(text: str) -> list[str]:
         if split_at == -1:
             split_at = MAX_MSG_LEN
 
-        parts.append(text[:split_at])
-        text = text[split_at:].lstrip("\n")
+        chunk = text[:split_at]
+        open_count = chunk.count("```") % 2
+        if open_count:
+            chunk += "\n```"
+            text = text[split_at:].lstrip("\n")
+            text = "```\n" + text
+        else:
+            parts.append(chunk)
+            text = text[split_at:].lstrip("\n")
 
     return parts

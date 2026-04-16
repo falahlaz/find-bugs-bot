@@ -5,12 +5,13 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import Application, MessageHandler, filters, CommandHandler
 
 import config
 from bot.handler import help_command, status_command, history_command, handle_message, make_env_command, make_time_range_command
 from jobqueue.job_queue import job_queue
-from scraper.browser import browser_manager
+from scraper.splunk_api import splunk_api
 from scraper.vpn_check import is_vpn_connected
 from scraper.splunk_scraper import scrape_splunk
 from analyzer.llm_analyzer import analyze, LLMAnalysisError
@@ -18,6 +19,13 @@ from bot.formatter import format_engineer_report, format_qa_report
 from storage.database import save_investigation
 
 shutting_down = False
+
+
+async def send_message_safe(bot, chat_id: int, text: str, parse_mode: str = "Markdown", **kwargs):
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode, **kwargs)
+    except BadRequest:
+        await bot.send_message(chat_id=chat_id, text=text, **kwargs)
 
 
 def setup_logging():
@@ -44,6 +52,7 @@ def setup_logging():
     root_logger.addHandler(file_handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("telegram").setLevel(logging.INFO)
     logging.getLogger("openai").setLevel(logging.WARNING)
 
@@ -64,25 +73,19 @@ async def process_job(job: dict, bot):
                     "VPN down for transaction_id=%s environment=%s (retry %d/3), re-queuing in 60s",
                     transaction_id, environment, job["vpn_retries"],
                 )
-                await bot.send_message(
-                    chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
                     text=f"⚠️ VPN not connected. Job for `{transaction_id}` [{environment}] paused, retrying in 60s.",
-                    parse_mode="Markdown",
                 )
                 await asyncio.sleep(60)
                 await job_queue.enqueue(job)
                 return
             else:
                 logging.error("VPN down after 3 retries for transaction_id=%s, abandoning", transaction_id)
-                await bot.send_message(
-                    chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
                     text=f"❌ Job for `{transaction_id}` [{environment}] abandoned after 3 VPN retries.",
-                    parse_mode="Markdown",
                 )
-                await bot.send_message(
-                    chat_id=requester_chat_id,
+                await send_message_safe(bot, requester_chat_id,
                     text=f"❌ Investigation failed for `{transaction_id}` — VPN connectivity issue. Please resubmit later.",
-                    parse_mode="Markdown",
                 )
                 await save_investigation(
                     transaction_id=transaction_id,
@@ -97,15 +100,11 @@ async def process_job(job: dict, bot):
 
         if result_status == "session_expired":
             logging.error("Splunk session expired, pausing queue")
-            await bot.send_message(
-                chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
                 text="🔐 Splunk session expired. Run `python save_session.py` to renew.",
-                parse_mode="Markdown",
             )
-            await bot.send_message(
-                chat_id=requester_chat_id,
+            await send_message_safe(bot, requester_chat_id,
                 text=f"⏸️ Investigation paused for `{transaction_id}` — will resume shortly.",
-                parse_mode="Markdown",
             )
             job_queue.pause()
             await save_investigation(
@@ -117,28 +116,17 @@ async def process_job(job: dict, bot):
             )
             return
 
-        if result_status == "browser_restarted":
-            logging.warning("Browser restarted, retrying job for transaction_id=%s", transaction_id)
-        result_status, log_data = await scrape_splunk(transaction_id, environment, time_range)
-
-        if result_status == "browser_error" or result_status == "error":
-            logging.error("Browser unrecoverable for transaction_id=%s", transaction_id)
-            await bot.send_message(
-                chat_id=config.TELEGRAM_YOUR_CHAT_ID,
-                text="🚨 Playwright browser crashed and could not recover. Restart the bot.",
-                parse_mode="Markdown",
-            )
-            await bot.send_message(
-                chat_id=requester_chat_id,
-                text=f"❌ Investigation failed for `{transaction_id}` — technical issue on our end.",
-                parse_mode="Markdown",
+        if result_status == "error":
+            logging.error("Splunk API error for transaction_id=%s", transaction_id)
+            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
+                text=f"🚨 Splunk API error processing `{transaction_id}` [{environment}]. Check logs/bot.log for details.",
             )
             await save_investigation(
                 transaction_id=transaction_id,
                 requester_chat_id=requester_chat_id,
                 environment=environment,
                 status="failed",
-                failure_reason="Browser crash, unrecoverable",
+                failure_reason=f"Splunk API error",
             )
             return
 
@@ -160,9 +148,9 @@ async def process_job(job: dict, bot):
                 time_range=time_range,
             )
             for msg in eng_msgs:
-                await bot.send_message(chat_id=config.TELEGRAM_YOUR_CHAT_ID, text=msg, parse_mode="Markdown")
+                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
             for msg in qa_msgs:
-                await bot.send_message(chat_id=requester_chat_id, text=msg, parse_mode="Markdown")
+                await send_message_safe(bot, requester_chat_id, text=msg)
             await save_investigation(
                 transaction_id=transaction_id,
                 requester_chat_id=requester_chat_id,
@@ -173,12 +161,10 @@ async def process_job(job: dict, bot):
             )
             return
 
-        if result_status not in ("success", "browser_restarted"):
+        if result_status not in ("success",):
             logging.error("Unexpected scraper status: %s for transaction_id=%s", result_status, transaction_id)
-            await bot.send_message(
-                chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
                 text=f"🚨 Unexpected error processing `{transaction_id}` [{environment}]. Status: {result_status}",
-                parse_mode="Markdown",
             )
             await save_investigation(
                 transaction_id=transaction_id,
@@ -226,9 +212,9 @@ async def process_job(job: dict, bot):
         )
 
         for msg in eng_msgs:
-            await bot.send_message(chat_id=config.TELEGRAM_YOUR_CHAT_ID, text=msg, parse_mode="Markdown")
+            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
         for msg in qa_msgs:
-            await bot.send_message(chat_id=requester_chat_id, text=msg, parse_mode="Markdown")
+            await send_message_safe(bot, requester_chat_id, text=msg)
 
         await save_investigation(
             transaction_id=transaction_id,
@@ -249,10 +235,8 @@ async def process_job(job: dict, bot):
     except Exception:
         logging.exception("Unhandled error processing job for transaction_id=%s", transaction_id)
         try:
-            await bot.send_message(
-                chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
                 text=f"🚨 Unexpected error processing `{transaction_id}` [{environment}]. Check logs/bot.log for details.",
-                parse_mode="Markdown",
             )
         except Exception:
             pass
@@ -262,13 +246,7 @@ async def post_init(application):
     from storage.database import init_db
     init_db()
 
-    try:
-        await browser_manager.start()
-    except Exception as e:
-        if "not found" in str(e).lower() or "no such file" in str(e).lower():
-            logging.critical("splunk_session.json not found. Run 'python save_session.py' first.")
-            sys.exit(1)
-        raise
+    await splunk_api.start()
 
     job_queue.initialize(application.bot)
     await job_queue.start_worker(process_job)
@@ -279,16 +257,16 @@ async def post_init(application):
 
 
 async def post_shutdown(application):
-    await browser_manager.close()
+    await splunk_api.close()
 
 
 def main():
-    if not os.path.exists(config.SPLUNK_SESSION_PATH):
-        print(f"❌ {config.SPLUNK_SESSION_PATH} not found. Run 'python save_session.py' first.")
+    if not os.path.exists(config.SPLUNK_API_SESSION_PATH):
+        print(f"❌ {config.SPLUNK_API_SESSION_PATH} not found. Run 'python save_session.py' first.")
         sys.exit(1)
 
     setup_logging()
-    logging.info("Starting Telegram Debug Bot...")
+    logging.info("Starting Telegram Debug Bot (Splunk API mode)...")
 
     application = (
         Application.builder()
@@ -341,10 +319,8 @@ async def _async_shutdown(app, signum):
 
     if pending > 0:
         try:
-            await app.bot.send_message(
-                chat_id=config.TELEGRAM_YOUR_CHAT_ID,
+            await send_message_safe(app.bot, config.TELEGRAM_YOUR_CHAT_ID,
                 text=f"🛑 Bot is shutting down. Draining {pending} remaining job(s)...",
-                parse_mode="Markdown",
             )
         except Exception:
             pass
@@ -355,9 +331,8 @@ async def _async_shutdown(app, signum):
     else:
         logging.info("No pending jobs, shutting down immediately.")
 
-    await browser_manager.close()
+    await splunk_api.close()
     logging.info("Shutdown complete.")
-    import os
     os._exit(0)
 
 

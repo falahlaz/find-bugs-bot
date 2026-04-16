@@ -1,10 +1,30 @@
+# Environment
 .env
+
+# Session / credentials
 splunk_session.json
+splunk_api_session.json
+
+# Database
 investigations.db
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
 venv/
+
+# Logs
 logs/
 *.log
+
+# Node (openai-proxy worker)
+openai-proxy/node_modules/
+openai-proxy/.wrangler/
+openai-proxy/dist/
+
+# Evidence artifacts
+evidences/
+
+# OS
 .DS_Store

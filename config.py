@@ -37,8 +37,10 @@ SPLUNK_URL = _env("SPLUNK_URL")
 SPLUNK_SPL_TEMPLATES = _env_json("SPLUNK_SPL_TEMPLATES")
 SPLUNK_ENVIRONMENTS = list(SPLUNK_SPL_TEMPLATES.keys())
 SPLUNK_SESSION_PATH = _env("SPLUNK_SESSION_PATH", "splunk_session.json")
+SPLUNK_API_SESSION_PATH = _env("SPLUNK_API_SESSION_PATH", "splunk_api_session.json")
 SPLUNK_RESULT_WAIT_TIMEOUT = _env_int("SPLUNK_RESULT_WAIT_TIMEOUT", 30)
 SPLUNK_SSO_DOMAIN = _env("SPLUNK_SSO_DOMAIN")
+SPLUNK_POLL_INTERVAL = _env_int("SPLUNK_POLL_INTERVAL", 2)
 MAX_LOG_LINES = _env_int("MAX_LOG_LINES", 100)
 SPLUNK_DEFAULT_TIME_RANGE = _env("SPLUNK_DEFAULT_TIME_RANGE", "24h")
 SPLUNK_TIME_RANGES = {"24": "24h", "48": "48h"}
@@ -48,7 +50,10 @@ TRANSACTION_ID_HEADER = _env("TRANSACTION_ID_HEADER", "X-Transaction-ID")
 
 LLM_API_KEY = _env("LLM_API_KEY")
 LLM_MODEL = _env("LLM_MODEL", "gpt-4o")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+LLM_PROXY = os.getenv("LLM_PROXY") or None
 LLM_SKIP_SSL_VERIFY = os.getenv("LLM_SKIP_SSL_VERIFY", "true").lower() == "true"
+SPLUNK_SKIP_SSL_VERIFY = os.getenv("SPLUNK_SKIP_SSL_VERIFY", "true").lower() == "true"
 
 TIMEZONE = _env("TIMEZONE", "Asia/Jakarta")
 DB_PATH = _env("DB_PATH", "investigations.db")
