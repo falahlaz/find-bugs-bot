@@ -37,6 +37,20 @@ def _now_formatted() -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S ") + now.strftime("%Z")
 
 
+def format_raw_log_message(
+    transaction_id: str,
+    environment: str,
+    time_range: str,
+    raw_log_snippet: str,
+) -> list[str]:
+    env_label = _env_display(environment)
+    header = f"📄 Raw logs — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]"
+    sanitized = _sanitize_code_block(raw_log_snippet)
+    body = f"```\n{sanitized}\n```"
+    text = f"{header}\n{body}"
+    return _split_message(text)
+
+
 def format_engineer_report(
     transaction_id: str,
     diagnosis: dict | None,
