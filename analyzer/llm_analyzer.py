@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 import httpx
 from openai import AsyncOpenAI
@@ -7,6 +8,42 @@ from openai import AsyncOpenAI
 import config
 
 logger = logging.getLogger(__name__)
+
+_http_client: httpx.AsyncClient | None = None
+_openai_client: AsyncOpenAI | None = None
+
+
+def _get_client() -> tuple[httpx.AsyncClient, AsyncOpenAI]:
+    global _http_client, _openai_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            verify=not config.LLM_SKIP_SSL_VERIFY,
+            proxy=config.LLM_PROXY,
+        )
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI(
+            api_key=config.LLM_API_KEY,
+            base_url=config.LLM_BASE_URL,
+            http_client=_http_client,
+        )
+    return _http_client, _openai_client
+
+
+async def close_client():
+    global _http_client, _openai_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+        _openai_client = None
+
+
+def _sanitize_log_lines(log_lines: str, max_chars: int = 80000) -> str:
+    sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", log_lines)
+    sanitized = sanitized.replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = sanitized.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+    if len(sanitized) > max_chars:
+        sanitized = sanitized[:max_chars] + f"\n... [truncated {len(log_lines) - max_chars} chars]"
+    return sanitized
 
 SYSTEM_PROMPT = """You are a backend debugging assistant for a software engineering team.
 You will receive raw application logs from a production system, identified by a transaction ID.
@@ -40,19 +77,12 @@ class LLMAnalysisError(Exception):
 
 
 async def analyze(transaction_id: str, log_lines: str) -> dict:
-    http_client = httpx.AsyncClient(
-        verify=not config.LLM_SKIP_SSL_VERIFY,
-        proxy=config.LLM_PROXY,
-    )
-    client = AsyncOpenAI(
-        api_key=config.LLM_API_KEY,
-        base_url=config.LLM_BASE_URL,
-        http_client=http_client,
-    )
+    _, client = _get_client()
 
+    sanitized_logs = _sanitize_log_lines(log_lines)
     user_prompt = USER_PROMPT_TEMPLATE.format(
         transaction_id=transaction_id,
-        log_lines=log_lines,
+        log_lines=sanitized_logs,
     )
 
     try:
@@ -67,6 +97,7 @@ async def analyze(transaction_id: str, log_lines: str) -> dict:
         )
     except Exception as e:
         logger.error("OpenAI API error for transaction_id=%s: %s", transaction_id, e)
+        logger.debug("Failed prompt (first 500 chars): %s", user_prompt[:500])
         raise LLMAnalysisError(f"OpenAI API error: {e}") from e
 
     content = response.choices[0].message.content

@@ -104,6 +104,18 @@ class JobQueue:
                 except asyncio.CancelledError:
                     pass
 
+    async def stop_worker(self, timeout: float = 5.0):
+        if self._worker_task is None:
+            return
+        self._draining = True
+        self._worker_task.cancel()
+        try:
+            await asyncio.wait_for(self._worker_task, timeout=timeout)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        self._worker_task = None
+        logger.info("Job queue worker stopped")
+
     def pause(self):
         self._paused = True
         logger.info("Queue paused")

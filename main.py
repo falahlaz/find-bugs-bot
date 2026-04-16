@@ -14,7 +14,7 @@ from jobqueue.job_queue import job_queue
 from scraper.splunk_api import splunk_api
 from scraper.vpn_check import is_vpn_connected
 from scraper.splunk_scraper import scrape_splunk
-from analyzer.llm_analyzer import analyze, LLMAnalysisError
+from analyzer.llm_analyzer import analyze, LLMAnalysisError, close_client
 from bot.formatter import format_engineer_report, format_qa_report
 from storage.database import save_investigation
 
@@ -257,6 +257,8 @@ async def post_init(application):
 
 
 async def post_shutdown(application):
+    await job_queue.stop_worker()
+    await close_client()
     await splunk_api.close()
 
 
@@ -331,6 +333,8 @@ async def _async_shutdown(app, signum):
     else:
         logging.info("No pending jobs, shutting down immediately.")
 
+    await job_queue.stop_worker()
+    await close_client()
     await splunk_api.close()
     logging.info("Shutdown complete.")
     os._exit(0)
