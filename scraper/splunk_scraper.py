@@ -18,7 +18,7 @@ async def scrape_splunk(
         )
         return ("error", None)
 
-    spl_query = template.format(transaction_id=transaction_id)
+    spl_query = template.format(transaction_id=transaction_id) + " NOT kong"
 
     logger.info(
         "Searching Splunk for transaction_id=%s environment=%s time_range=%s",
