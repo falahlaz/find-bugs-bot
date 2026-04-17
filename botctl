@@ -34,11 +34,12 @@ check_prerequisites() {
         exit 1
     fi
     if [ ! -f "$REPO_DIR/splunk_api_session.json" ]; then
-        echo "ERROR: Splunk session not found."
+        echo "WARNING: Splunk session not found."
         echo ""
-        echo "Run save_session.py first:"
-        echo "  python save_session.py"
-        exit 1
+        echo "Set SPLUNK_SSO_EMAIL, SPLUNK_SSO_EMPLOYEE_ID, and SPLUNK_SSO_PASSWORD in .env"
+        echo "The bot will auto-login on first start."
+        echo ""
+        echo "Or run manually: python save_session_auto.py"
     fi
     mkdir -p "$REPO_DIR/logs"
 }
