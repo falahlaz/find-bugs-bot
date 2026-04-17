@@ -2,7 +2,7 @@
 
 ## What this is
 
-A Telegram bot that takes curl snippets from QA, queries Splunk via REST API, runs logs through OpenAI, and returns a diagnosis card on Telegram. Python 3.11+, no framework (pure asyncio + python-telegram-bot).
+A Telegram bot that takes curl snippets from QA, queries Splunk via REST API, runs logs through OpenAI, and returns a diagnosis card on Telegram. Python 3.11+, no framework (pure asyncio + python-telegram-bot). **Version 2.0.0** — includes automated SSO re-authentication.
 
 ## Commands
 
@@ -12,8 +12,8 @@ python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Save Splunk SSO session + extract API cookies (must run before main.py, requires headed browser + VPN)
-python save_session.py
+# Save Splunk SSO session — auto-fills credentials, just approve 2FA on phone
+python save_session_auto.py
 
 # Run the bot (VPN must be connected)
 source venv/bin/activate
@@ -23,6 +23,9 @@ python main.py
 
 # Inspect Splunk network API calls (captures XHR/fetch requests during browser session)
 python splunk_inspector.py
+
+# Capture exact SSO page selectors (for updating login automation)
+python sso_scraper.py
 ```
 
 No test suite, no linter, no type checker configured.
@@ -38,26 +41,28 @@ No test suite, no linter, no type checker configured.
 - **No `tests/` directory** — this project has no automated tests.
 - **No CI** — no `.github/workflows` or pre-commit hooks.
 - **Package imports use relative paths within the repo** — e.g. `from scraper.splunk_api import splunk_api`. All packages are plain directories with `__init__.py`.
-- **Playwright is sync only** in `save_session.py` for initial SSO login. The main bot uses pure HTTP (httpx) — no browser at runtime.
+- **Playwright is sync only** in `save_session_auto.py` for SSO auto-login. The main bot uses pure HTTP (httpx) — no browser at runtime.
 - **`requirements/`** contains prompt/requirement docs (`prompt.md`, `requirement.md`), not pip requirement files.
+- **Auto re-authentication** — when the Splunk session expires, the bot automatically relaunches the browser, fills credentials, and waits for 2FA approval without requiring manual intervention.
 
 ## Splunk API integration
 
-The bot queries Splunk through its REST API, proxied via the web UI path `/en-US/splunkd/__raw/`. Authentication uses SSO session cookies extracted from `save_session.py`. The 3-step search flow:
+The bot queries Splunk through its REST API, proxied via the web UI path `/en-US/splunkd/__raw/`. Authentication uses SSO session cookies extracted from `save_session_auto.py`. The 3-step search flow:
 
 1. **POST** `/services/search/v2/jobs` — create search job, returns `sid`
 2. **GET** `/services/search/v2/jobs/{sid}` — poll until `isDone=true`
 3. **GET** `/services/search/v2/jobs/{sid}/events` — fetch raw log events as JSON
 
-Required cookies (extracted by `save_session.py`): `splunkd_8008`, `session_id_8008`, `splunkweb_csrf_token_8008`, `token_key`. The CSRF token must also be sent as `X-Splunk-Form-Key` header.
+Required cookies (extracted by `save_session_auto.py`): `splunkd_8008`, `session_id_8008`, `splunkweb_csrf_token_8008`, `token_key`. The CSRF token must also be sent as `X-Splunk-Form-Key` header.
 
 ## Gotchas
 
 - **VPN required at runtime** — the bot TCP-probes `VPN_CHECK_HOST` before each Splunk query. Jobs retry 3× with 60s delays if VPN is down.
-- **Splunk session cookies expire** — when the bot alerts about session expiry, re-run `python save_session.py` to refresh both the Playwright state and API cookies.
+- **Splunk session cookies expire** — the bot auto-re-authenticates when session expiry is detected. If auto re-auth fails, run `python save_session_auto.py` to manually refresh.
 - **`SPLUNK_SPL_TEMPLATES` in `.env`** is a JSON string on a single line — `config.py` parses it with `json.loads()`. Environments are dynamically registered as Telegram commands from the keys of this dict.
 - **`LLM_SKIP_SSL_VERIFY`** defaults to `true` (corporate VPN/proxy environment).
 - **SQLite database** (`investigations.db`) is gitignored and created at runtime.
+- **SSO credentials** — set `SPLUNK_SSO_EMAIL`, `SPLUNK_SSO_EMPLOYEE_ID`, and `SPLUNK_SSO_PASSWORD` in `.env` to enable auto-login.
 
 ## Directories
 
@@ -69,5 +74,5 @@ Required cookies (extracted by `save_session.py`): `splunkd_8008`, `session_id_8
 | `scraper/` | Splunk API client (`splunk_api.py`), VPN check, legacy browser manager |
 | `analyzer/` | OpenAI LLM integration |
 | `storage/` | SQLite read/write for investigation records |
-| `evidences/` | Evidence artifacts (gitignored content) |
+| `evidences/` | Evidence artifacts — SSO selector captures, error screenshots (gitignored) |
 | `logs/` | Rotating log files (gitignored) |

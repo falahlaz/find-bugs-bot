@@ -63,3 +63,5 @@ DB_PATH = _env("DB_PATH", "investigations.db")
 
 LOG_DIR = _env("LOG_DIR", "logs")
 LOG_FILE = os.path.join(LOG_DIR, "bot.log")
+
+APP_VERSION = "2.0.0"

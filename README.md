@@ -1,4 +1,4 @@
-# Debug Bot — Telegram Splunk Debugging Bot
+# Debug Bot — Telegram Splunk Debugging Bot **v2.0.0**
 
 A Telegram bot that accepts curl snippets from QA, searches Splunk automatically (across multiple environments), and delivers an AI-summarized diagnosis to you on Telegram.
 
@@ -46,6 +46,9 @@ SPLUNK_SPL_TEMPLATES={"prod":"index=\"your_prod_index\" \"{transaction_id}\"","d
 SPLUNK_SESSION_PATH=splunk_session.json
 SPLUNK_RESULT_WAIT_TIMEOUT=30
 SPLUNK_SSO_DOMAIN=login.your-company.com
+SPLUNK_SSO_EMAIL=your_work_email@company.com
+SPLUNK_SSO_EMPLOYEE_ID=your_employee_id
+SPLUNK_SSO_PASSWORD=your_sso_password
 MAX_LOG_LINES=100
 
 # VPN check
@@ -71,6 +74,9 @@ DB_PATH=investigations.db
 | `SPLUNK_SESSION_PATH` | Path to saved session file (default: `splunk_session.json`) |
 | `SPLUNK_RESULT_WAIT_TIMEOUT` | Seconds to wait for Splunk results (default: 30) |
 | `SPLUNK_SSO_DOMAIN` | Domain in URL that indicates SSO login redirect |
+| `SPLUNK_SSO_EMAIL` | Work email for Azure AD login (used by auto-login) |
+| `SPLUNK_SSO_EMPLOYEE_ID` | Employee ID for corporate SSO login (used by auto-login) |
+| `SPLUNK_SSO_PASSWORD` | SSO password for auto-login |
 | `MAX_LOG_LINES` | Max log lines to extract per query (default: 100) |
 | `VPN_CHECK_HOST` | Internal hostname only reachable via VPN |
 | `TRANSACTION_ID_HEADER` | Header name containing the transaction ID |
@@ -91,28 +97,22 @@ playwright install chromium
 ### 5. Save Splunk Session
 
 ```bash
-python save_session.py
+python save_session_auto.py
 ```
 
-A Chromium browser window opens. Complete your SSO login, then press Enter in the terminal. This creates `splunk_session.json`.
+A Chromium browser window opens, auto-fills your SSO credentials, then waits for you to approve the 2FA push on your phone. No manual typing required — just tap approve. The session is saved automatically.
 
-> Re-run this whenever the bot sends you a "🔐 Session expired" alert.
+> **Session auto-renews** — when the bot detects an expired session, it automatically relaunches the browser and waits for 2FA. You only need to manually run this if auto-reauth fails.
 
-### 6. Customize Splunk Selectors
+### 5b. Inspect SSO Selectors (optional)
 
-The bot needs accurate CSS selectors for your Splunk instance's UI. Run:
+If your SSO page structure changes, update the selectors in `save_session_auto.py` using:
 
 ```bash
-playwright codegen <YOUR_SPLUNK_URL>
+python sso_scraper.py
 ```
 
-Perform a search interactively. Then update the selector constants at the top of `scraper/splunk_scraper.py`:
-
-```python
-SPLUNK_SEARCH_INPUT = 'textarea[data-test="search-input"]'   # your search bar selector
-SPLUNK_SEARCH_BUTTON = 'button[data-test="search-button"]'   # your submit button selector
-SPLUNK_RESULTS_CONTAINER = 'div[data-test="results-container"]'  # your results container
-```
+Walk through the login flow in the browser — it captures all form inputs, buttons, and selectors at each step and saves them to `evidences/sso_selectors.json`.
 
 ## Running the Bot
 
@@ -177,11 +177,13 @@ If you edit `.env`, restart to pick up new values:
 
 **Renewing Splunk session:**
 
-When the bot alerts you about session expiry:
+The bot auto-re-authenticates when session expiry is detected — no manual action needed. Just approve the 2FA push on your phone when the browser pops open.
+
+If auto-reauth fails:
 
 ```bash
-python save_session.py   # complete SSO login in browser
-./botctl restart         # restart to use the new session
+python save_session_auto.py   # approve 2FA in browser
+./botctl restart             # if running as background service
 ```
 
 ## Usage
@@ -285,7 +287,7 @@ QA selects env (/prod, /dev, etc.)
 | Missing transaction ID header | — | "Could not find X-Transaction-ID header" |
 | Queue full (10 jobs) | — | "Bot is busy, please retry" |
 | VPN down (3 retries) | "❌ Job abandoned after 3 VPN retries" | "Investigation failed — VPN issue" |
-| Splunk session expired | "🔐 Session expired. Run save_session.py" | "Investigation paused" |
+| Splunk session expired | "🔐 Session expired. Auto-re-authenticating..." | "Investigation paused" |
 | No logs found | "No logs found for transaction ID [env]" | "No logs found" |
 | LLM API error | Raw logs (truncated 3000 chars) + error note | "Engineer is reviewing" |
 | Browser crash | "🚨 Browser crashed. Restart the bot." | "Technical issue on our end" |
@@ -308,7 +310,9 @@ If drain takes longer than 5 minutes, it force-exits with a warning.
 ```
 bugs-bot/
 ├── main.py                  # Entry point, signal handlers, job pipeline
-├── save_session.py          # One-time script to save Splunk SSO session
+├── save_session_auto.py     # Auto-login script: fills SSO credentials, waits for 2FA
+├── save_session.py          # Legacy manual login script (fallback)
+├── sso_scraper.py           # SSO page selector inspector
 ├── config.py                # Loads .env, exposes typed constants
 ├── .env                     # Secrets (gitignored)
 ├── .env.example             # Template for onboarding
@@ -344,25 +348,24 @@ bugs-bot/
 
 ## Renewing the Splunk Session
 
-When the bot detects an expired session, it will alert you. To renew:
+**Automatic (v2.0.0):** When the session expires, the bot automatically relaunches the browser, fills credentials, and waits for you to approve the 2FA push on your phone. No manual intervention needed.
+
+**Manual fallback:** If auto-reauth fails, run:
 
 ```bash
-python save_session.py
-# Complete SSO login in the browser, press Enter
-# Then restart the bot:
-python main.py          # if running in foreground
-./botctl restart        # if running as background service
+python save_session_auto.py
+# Approve 2FA on your phone in the browser
+# Bot picks up the new session automatically
 ```
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---|---|
-| `splunk_session.json not found` | Run `python save_session.py` first |
+| `splunk_api_session.json not found` | Bot auto-logins if credentials are set in `.env`. Otherwise run `python save_session_auto.py` |
 | Bot doesn't respond to group messages | Group chats are not supported — use private chat only |
 | VPN check always fails | Ensure Global Protect is connected and `VPN_CHECK_HOST` is correct |
-| Splunk selectors broken | Splunk UI may have updated — re-run `playwright codegen` and update selectors in `scraper/splunk_scraper.py` |
-| Browser crashes repeatedly | Restart the bot. If persistent, check Playwright installation: `playwright install chromium` |
+| SSO auto-login fails | Check `SPLUNK_SSO_EMAIL`, `SPLUNK_SSO_EMPLOYEE_ID`, and `SPLUNK_SSO_PASSWORD` in `.env`. Run `python sso_scraper.py` to update selectors if SSO page changed |
 | LLM gives wrong diagnosis | Raw logs are always saved to SQLite. Check `/history` or query `investigations.db` directly |
 | Bot not running after reboot | Expected — run `./botctl start` manually |
 | `launchctl` error / plist not found | Run `./botctl start` to install the plist |
