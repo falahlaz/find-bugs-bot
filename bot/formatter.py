@@ -187,9 +187,10 @@ def format_qa_report(
     severity_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}
     sev = d.get("severity", "unknown").lower()
     error_source = d.get("error_source", "unknown").lower()
-    source_label = {"esb": "ESB (External)", "internal": "Internal"}.get(error_source, "Unknown")
+    source_label = {"esb": "ESB (External)", "tibco": "TIBCO (External)", "internal": "Internal"}.get(error_source, "Unknown")
     source_action = {
         "esb": "This is an external dependency error — no action needed from your side. The team is monitoring for resolution.",
+        "tibco": "This is an external dependency error — no action needed from your side. The team is monitoring for resolution.",
         "internal": "This is an internal service error — please escalate to the development team.",
     }.get(error_source, "The engineering team has been notified and is looking into it.")
 

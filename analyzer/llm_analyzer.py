@@ -57,14 +57,25 @@ Be precise, technical, and concise. Do not speculate beyond what the logs show.
 
 Classify the error source as one of:
 - "esb" if the root cause is an ESB (Enterprise Service Bus) failure, timeout, or error response
+- "tibco" if the root cause is a TIBCO (ESB-like middleware) failure, timeout, or error response
 - "internal" if the root cause is within internal services (code bugs, validation failures, config errors, etc.)
 - "unknown" if it cannot be determined from the logs
+
+If the logs contain ESB or TIBCO errors, treat that as the root cause — even if the internal service also returned a 500. The internal 500 is a consequence of the downstream failure, not the root cause.
 
 If the logs contain ESB (Enterprise Service Bus) errors:
 - Put the ESB error message in the "error_type" field
 - Put the ESB endpoint URL in the "failed_component" field
 - Include the full ESB response body in the "likely_cause" field
-- Include the HTTP status code and any correlation IDs in the "suggested_action" field"""
+- Include the HTTP status code and any correlation IDs in the "suggested_action" field
+
+If the logs contain TIBCO errors (identified by log entries where "service": "[TIBCO]"):
+- Put the HTTP status code (e.g., 503) in the "error_type" field
+- Put the TIBCO URI in the "failed_component" field
+- Note in "likely_cause" that TIBCO returned an error response (it may return only a status with no body — watch for entries with status codes but null err field)
+- Include the HTTP status code and URI in "suggested_action" field
+
+Both ESB and TIBCO may only return a status code without a response body — if a log entry shows status but err is null or missing, treat it as a valid error signal."""
 
 _USER_PROMPT_TEMPLATE = (
     "Transaction ID: {transaction_id}\n"
@@ -84,7 +95,7 @@ _USER_PROMPT_TEMPLATE = (
     '  "severity": "low | medium | high | critical",\n'
     '  "suggested_action": "specific next step the engineer should take",\n'
     '  "relevant_logs": ["exact log line 1", "exact log line 2", ...],\n'
-    '  "error_source": "esb | internal | unknown"\n'
+    '  "error_source": "esb | tibco | internal | unknown"\n'
     "}}\n"
     "\n"
     "In \"relevant_logs\", include ONLY the exact log lines (verbatim from the raw logs) that are most critical to understanding the error — error-level logs, exceptions, failed calls, validation failures. Max 10 lines. Do not paraphrase or rewrite them.\n"
