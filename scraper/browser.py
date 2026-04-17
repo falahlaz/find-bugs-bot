@@ -34,7 +34,7 @@ class BrowserManager:
             storage_state = session_path
             logger.info("Loaded session from %s", session_path)
         else:
-            logger.error("Session file %s not found. Run 'python save_session.py' first.", session_path)
+            logger.error("Session file %s not found. Run 'python save_session_auto.py' first.", session_path)
 
         self._context = await self._browser.new_context(
             storage_state=storage_state,

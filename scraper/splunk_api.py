@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import sys
 from urllib.parse import urlencode
 
 import httpx
@@ -91,14 +90,10 @@ class SplunkAPIClient:
 
     async def auto_reauth(self) -> bool:
         logger.info("Attempting auto re-authentication...")
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(__file__), "..", "save_session_auto.py")],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            logger.error("Auto re-auth failed: %s", result.stderr)
+        from save_session_auto import auto_login_async
+        success = await auto_login_async()
+        if not success:
+            logger.error("Auto re-auth failed")
             return False
         await self._reload_session()
         logger.info("Auto re-auth successful")

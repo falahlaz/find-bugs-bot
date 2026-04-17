@@ -277,9 +277,9 @@ def main():
     if not os.path.exists(config.SPLUNK_API_SESSION_PATH):
         if config.SPLUNK_SSO_EMAIL and config.SPLUNK_SSO_EMPLOYEE_ID and config.SPLUNK_SSO_PASSWORD:
             print(f"⚠️  Session not found. Running auto-login...")
-            import subprocess, sys
-            result = subprocess.run([sys.executable, "save_session_auto.py"])
-            if result.returncode != 0:
+            from save_session_auto import auto_login
+            success = auto_login()
+            if not success:
                 print("❌ Auto-login failed. Fix credentials in .env and try again.")
                 sys.exit(1)
         else:
