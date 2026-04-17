@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from urllib.parse import urlencode
 
 import httpx
@@ -37,7 +38,7 @@ class SplunkAPIClient:
         if session_data is None:
             raise SplunkAPIError(
                 f"API session file {self.session_path} not found. "
-                "Run 'python save_session.py' first."
+                "Run 'python save_session_auto.py' first."
             )
 
         self._cookies = session_data["cookies"]
@@ -81,6 +82,27 @@ class SplunkAPIClient:
         except (json.JSONDecodeError, KeyError) as e:
             logger.error("Failed to parse API session file: %s", e)
             return None
+
+    async def _reload_session(self):
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+        await self.start()
+
+    async def auto_reauth(self) -> bool:
+        logger.info("Attempting auto re-authentication...")
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "..", "save_session_auto.py")],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error("Auto re-auth failed: %s", result.stderr)
+            return False
+        await self._reload_session()
+        logger.info("Auto re-auth successful")
+        return True
 
     def _api_url(self, path: str) -> str:
         return f"{API_PREFIX}{path}"

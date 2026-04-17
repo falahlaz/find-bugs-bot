@@ -99,22 +99,33 @@ async def process_job(job: dict, bot):
         result_status, log_data = await scrape_splunk(transaction_id, environment, time_range)
 
         if result_status == "session_expired":
-            logging.error("Splunk session expired, pausing queue")
-            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
-                text="🔐 Splunk session expired. Run `python save_session.py` to renew.",
-            )
-            await send_message_safe(bot, requester_chat_id,
-                text=f"⏸️ Investigation paused for `{transaction_id}` — will resume shortly.",
-            )
-            job_queue.pause()
-            await save_investigation(
-                transaction_id=transaction_id,
-                requester_chat_id=requester_chat_id,
-                environment=environment,
-                status="failed",
-                failure_reason="Splunk session expired",
-            )
-            return
+            logging.error("Splunk session expired, attempting auto re-auth")
+            reauth_ok = await splunk_api.auto_reauth()
+            if reauth_ok:
+                logging.info("Re-auth succeeded, re-queuing job for transaction_id=%s", transaction_id)
+                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
+                    text=f"🔐 Session expired — auto re-auth successful. Resuming job for `{transaction_id}`...",
+                )
+                job_queue.resume()
+                await job_queue.enqueue(job)
+                return
+            else:
+                logging.error("Auto re-auth failed for transaction_id=%s", transaction_id)
+                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID,
+                    text="🔐 Splunk session expired. Auto re-auth failed — run `python save_session_auto.py` to renew.",
+                )
+                job_queue.pause()
+                await send_message_safe(bot, requester_chat_id,
+                    text=f"⏸️ Investigation paused for `{transaction_id}` — will resume shortly.",
+                )
+                await save_investigation(
+                    transaction_id=transaction_id,
+                    requester_chat_id=requester_chat_id,
+                    environment=environment,
+                    status="failed",
+                    failure_reason="Splunk session expired (auto re-auth failed)",
+                )
+                return
 
         if result_status == "error":
             logging.error("Splunk API error for transaction_id=%s", transaction_id)
@@ -264,8 +275,18 @@ async def post_shutdown(application):
 
 def main():
     if not os.path.exists(config.SPLUNK_API_SESSION_PATH):
-        print(f"❌ {config.SPLUNK_API_SESSION_PATH} not found. Run 'python save_session.py' first.")
-        sys.exit(1)
+        if config.SPLUNK_SSO_EMAIL and config.SPLUNK_SSO_EMPLOYEE_ID and config.SPLUNK_SSO_PASSWORD:
+            print(f"⚠️  Session not found. Running auto-login...")
+            import subprocess, sys
+            result = subprocess.run([sys.executable, "save_session_auto.py"])
+            if result.returncode != 0:
+                print("❌ Auto-login failed. Fix credentials in .env and try again.")
+                sys.exit(1)
+        else:
+            print(f"❌ {config.SPLUNK_API_SESSION_PATH} not found.")
+            print("   Set SPLUNK_SSO_EMAIL, SPLUNK_SSO_EMPLOYEE_ID, and SPLUNK_SSO_PASSWORD in .env, then run:")
+            print("   python save_session_auto.py")
+            sys.exit(1)
 
     setup_logging()
     logging.info("Starting Telegram Debug Bot (Splunk API mode)...")
