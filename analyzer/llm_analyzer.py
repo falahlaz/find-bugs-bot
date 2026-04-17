@@ -55,6 +55,11 @@ Your job is to:
 
 Be precise, technical, and concise. Do not speculate beyond what the logs show.
 
+Classify the error source as one of:
+- "esb" if the root cause is an ESB (Enterprise Service Bus) failure, timeout, or error response
+- "internal" if the root cause is within internal services (code bugs, validation failures, config errors, etc.)
+- "unknown" if it cannot be determined from the logs
+
 If the logs contain ESB (Enterprise Service Bus) errors:
 - Put the ESB error message in the "error_type" field
 - Put the ESB endpoint URL in the "failed_component" field
@@ -78,7 +83,8 @@ _USER_PROMPT_TEMPLATE = (
     '  "likely_cause": "your best diagnosis of root cause based on the logs",\n'
     '  "severity": "low | medium | high | critical",\n'
     '  "suggested_action": "specific next step the engineer should take",\n'
-    '  "relevant_logs": ["exact log line 1", "exact log line 2", ...]\n'
+    '  "relevant_logs": ["exact log line 1", "exact log line 2", ...],\n'
+    '  "error_source": "esb | internal | unknown"\n'
     "}}\n"
     "\n"
     "In \"relevant_logs\", include ONLY the exact log lines (verbatim from the raw logs) that are most critical to understanding the error — error-level logs, exceptions, failed calls, validation failures. Max 10 lines. Do not paraphrase or rewrite them.\n"
@@ -124,7 +130,7 @@ async def analyze(transaction_id: str, log_lines: str) -> dict:
         logger.warning("LLM returned malformed JSON for transaction_id=%s", transaction_id)
         raise LLMAnalysisError(f"Malformed JSON response: {content}")
 
-    required_fields = {"summary", "error_type", "failed_component", "likely_cause", "severity", "suggested_action", "relevant_logs"}
+    required_fields = {"summary", "error_type", "failed_component", "likely_cause", "severity", "suggested_action", "relevant_logs", "error_source"}
     if not required_fields.issubset(diagnosis.keys()):
         logger.warning("LLM response missing fields for transaction_id=%s: %s", transaction_id, diagnosis)
 

@@ -186,12 +186,20 @@ def format_qa_report(
     d = diagnosis or {}
     severity_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}
     sev = d.get("severity", "unknown").lower()
+    error_source = d.get("error_source", "unknown").lower()
+    source_label = {"esb": "ESB (External)", "internal": "Internal"}.get(error_source, "Unknown")
+    source_action = {
+        "esb": "This is an external dependency error — no action needed from your side. The team is monitoring for resolution.",
+        "internal": "This is an internal service error — please escalate to the development team.",
+    }.get(error_source, "The engineering team has been notified and is looking into it.")
 
     text = (
         f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
         f"{severity_emoji.get(sev, '❓')} Severity: {sev.title()}\n"
+        f"🔧 Error source: {source_label}\n"
+        f"📍 Component: {_escape_markdown(d.get('failed_component', '—'))}\n"
         f"📋 What happened:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
-        "The engineering team has been notified and is looking into it."
+        f"📌 {source_action}"
     )
     return _split_message(text)
 
