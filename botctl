@@ -1,0 +1,103 @@
+#!/bin/bash
+set -e
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLIST_PATH="$REPO_DIR/com.findbugs.bot.plist"
+LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+INSTALLED_PLIST="$LAUNCH_AGENTS/com.findbugs.bot.plist"
+
+cmd="$1"
+
+install() {
+    mkdir -p "$LAUNCH_AGENTS"
+    if [ ! -f "$PLIST_PATH" ]; then
+        echo "ERROR: $PLIST_PATH not found."
+        exit 1
+    fi
+    cp "$PLIST_PATH" "$LAUNCH_AGENTS/"
+    echo "Installed to $INSTALLED_PLIST"
+}
+
+uninstall() {
+    if [ -f "$INSTALLED_PLIST" ]; then
+        launchctl unload "$INSTALLED_PLIST" 2>/dev/null || true
+        rm "$INSTALLED_PLIST"
+        echo "Removed from $INSTALLED_PLIST"
+    else
+        echo "Not installed."
+    fi
+}
+
+start() {
+    if [ ! -f "$INSTALLED_PLIST" ]; then
+        install
+    fi
+    launchctl load "$INSTALLED_PLIST"
+    echo "Bot started."
+}
+
+stop() {
+    if [ -f "$INSTALLED_PLIST" ]; then
+        launchctl unload "$INSTALLED_PLIST" 2>/dev/null || true
+        echo "Bot stopped."
+    else
+        echo "Not running (plist not found)."
+    fi
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+status() {
+    echo
+    launchctl list | grep "com.findbugs.bot" || echo "Not running."
+    echo
+    if [ -f "$INSTALLED_PLIST" ]; then
+        echo "Plist: $INSTALLED_PLIST (installed)"
+    else
+        echo "Plist: $INSTALLED_PLIST (NOT installed)"
+    fi
+}
+
+logs() {
+    exec tail -f "$REPO_DIR/logs/bot.log"
+}
+
+case "$cmd" in
+    install)
+        install
+        ;;
+    uninstall)
+        uninstall
+        ;;
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status
+        ;;
+    logs)
+        logs
+        ;;
+    *)
+        echo "Usage: ./botctl {start|stop|restart|status|logs|install|uninstall}"
+        echo
+        echo "  start    - Start the bot (installs if needed)"
+        echo "  stop     - Stop the bot"
+        echo "  restart  - Stop then start"
+        echo "  status   - Show running state"
+        echo "  logs     - Tail bot.log"
+        echo "  install  - Copy plist to ~/Library/LaunchAgents/"
+        echo "  uninstall- Remove plist and stop bot"
+        exit 1
+        ;;
+esac

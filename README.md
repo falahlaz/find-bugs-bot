@@ -116,6 +116,8 @@ SPLUNK_RESULTS_CONTAINER = 'div[data-test="results-container"]'  # your results 
 
 ## Running the Bot
 
+### Foreground (for testing)
+
 ```bash
 # Make sure Global Protect VPN is connected
 source venv/bin/activate
@@ -130,6 +132,57 @@ chmod +x start.sh
 ```
 
 The bot logs to both the console and `logs/bot.log` (rotating, 5MB max, 3 files kept).
+Press `Ctrl+C` for graceful shutdown (drains pending jobs before exiting).
+
+### Background Service (macOS, recommended for daily use)
+
+The bot can run as a **launchd background service** — start and stop it from anywhere without keeping a terminal open.
+
+**One-time setup:**
+
+```bash
+chmod +x botctl
+./botctl start
+```
+
+This installs a launchd plist to `~/Library/LaunchAgents/` and starts the bot immediately.
+
+**Command reference:**
+
+| Command | Description |
+|---|---|
+| `./botctl start` | Start the bot (installs plist if needed) |
+| `./botctl stop` | Stop the bot completely |
+| `./botctl restart` | Stop then start |
+| `./botctl status` | Show running state and PID |
+| `./botctl logs` | Tail `logs/bot.log` |
+| `./botctl uninstall` | Remove plist and stop bot |
+
+**Behavior:**
+
+- **Does NOT auto-start on login or reboot** — you must run `./botctl start` manually
+- **Auto-restarts on crash** — if the bot crashes while running, launchd restarts it automatically
+- **`./botctl stop` fully stops** — kills the process and prevents auto-restart until you `start` again
+
+> **Tip:** To run `botctl` from anywhere, symlink it:  
+> `ln -s /path/to/bugs-bot/botctl /usr/local/bin/botctl`
+
+**Updating configuration:**
+
+If you edit `.env`, restart to pick up new values:
+
+```bash
+./botctl restart
+```
+
+**Renewing Splunk session:**
+
+When the bot alerts you about session expiry:
+
+```bash
+python save_session.py   # complete SSO login in browser
+./botctl restart         # restart to use the new session
+```
 
 ## Usage
 
@@ -239,12 +292,14 @@ QA selects env (/prod, /dev, etc.)
 
 ## Graceful Shutdown
 
-Press `Ctrl+C` to shut down. The bot will:
+**Foreground:** Press `Ctrl+C`. The bot will:
 1. Stop accepting new jobs
 2. Send you: "🛑 Shutting down. Draining N remaining job(s)..."
 3. Finish all pending jobs
-4. Close the browser
+4. Close connections
 5. Exit
+
+**Background service:** Run `./botctl stop` — same graceful drain behavior.
 
 If drain takes longer than 5 minutes, it force-exits with a warning.
 
@@ -258,7 +313,9 @@ bugs-bot/
 ├── .env                     # Secrets (gitignored)
 ├── .env.example             # Template for onboarding
 ├── requirements.txt
-├── start.sh                 # Convenience startup script
+├── start.sh                 # Convenience startup script (foreground)
+├── botctl                   # Background service control script
+├── com.findbugs.bot.plist # launchd service definition
 │
 ├── bot/
 │   ├── handler.py           # Telegram message handlers
@@ -293,7 +350,8 @@ When the bot detects an expired session, it will alert you. To renew:
 python save_session.py
 # Complete SSO login in the browser, press Enter
 # Then restart the bot:
-python main.py
+python main.py          # if running in foreground
+./botctl restart        # if running as background service
 ```
 
 ## Troubleshooting
@@ -306,3 +364,6 @@ python main.py
 | Splunk selectors broken | Splunk UI may have updated — re-run `playwright codegen` and update selectors in `scraper/splunk_scraper.py` |
 | Browser crashes repeatedly | Restart the bot. If persistent, check Playwright installation: `playwright install chromium` |
 | LLM gives wrong diagnosis | Raw logs are always saved to SQLite. Check `/history` or query `investigations.db` directly |
+| Bot not running after reboot | Expected — run `./botctl start` manually |
+| `launchctl` error / plist not found | Run `./botctl start` to install the plist |
+| Bot keeps restarting on crash | Check `logs/launchd-stderr.log` — likely VPN down or session expired |
