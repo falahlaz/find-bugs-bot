@@ -28,3 +28,6 @@ evidences/
 
 # OS
 .DS_Store
+
+# launchd (deployed plist)
+com.findbugs.bot.plist

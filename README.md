@@ -315,7 +315,7 @@ bugs-bot/
 ├── requirements.txt
 ├── start.sh                 # Convenience startup script (foreground)
 ├── botctl                   # Background service control script
-├── com.findbugs.bot.plist # launchd service definition
+├── com.findbugs.bot.plist.template # launchd service definition template
 │
 ├── bot/
 │   ├── handler.py           # Telegram message handlers

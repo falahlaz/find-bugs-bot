@@ -1,20 +1,52 @@
 #!/bin/bash
 set -e
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLIST_PATH="$REPO_DIR/com.findbugs.bot.plist"
+resolve_repo_dir() {
+    local source="$0"
+    while [ -L "$source" ]; do
+        local dir="$(cd -P "$(dirname "$source")" && pwd)"
+        source="$(readlink "$source")"
+        [[ "$source" != /* ]] && source="$dir/$source"
+    done
+    REPO_DIR="$(cd -P "$(dirname "$source")" && pwd)"
+}
+
+resolve_repo_dir
+
+TEMPLATE_PLIST="$REPO_DIR/com.findbugs.bot.plist.template"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 INSTALLED_PLIST="$LAUNCH_AGENTS/com.findbugs.bot.plist"
 
 cmd="$1"
 
-install() {
-    mkdir -p "$LAUNCH_AGENTS"
-    if [ ! -f "$PLIST_PATH" ]; then
-        echo "ERROR: $PLIST_PATH not found."
+check_prerequisites() {
+    if [ ! -f "$TEMPLATE_PLIST" ]; then
+        echo "ERROR: $TEMPLATE_PLIST not found."
         exit 1
     fi
-    cp "$PLIST_PATH" "$LAUNCH_AGENTS/"
+    if [ ! -d "$REPO_DIR/venv" ]; then
+        echo "ERROR: Virtual environment not found."
+        echo ""
+        echo "Run setup first:"
+        echo "  python3.11 -m venv venv"
+        echo "  source venv/bin/activate"
+        echo "  pip install -r requirements.txt"
+        exit 1
+    fi
+    if [ ! -f "$REPO_DIR/splunk_api_session.json" ]; then
+        echo "ERROR: Splunk session not found."
+        echo ""
+        echo "Run save_session.py first:"
+        echo "  python save_session.py"
+        exit 1
+    fi
+    mkdir -p "$REPO_DIR/logs"
+}
+
+install() {
+    check_prerequisites
+    mkdir -p "$LAUNCH_AGENTS"
+    sed "s|{{REPO_DIR}}|$REPO_DIR|g" "$TEMPLATE_PLIST" > "$INSTALLED_PLIST"
     echo "Installed to $INSTALLED_PLIST"
 }
 
@@ -29,6 +61,7 @@ uninstall() {
 }
 
 start() {
+    check_prerequisites
     if [ ! -f "$INSTALLED_PLIST" ]; then
         install
     fi
@@ -96,7 +129,7 @@ case "$cmd" in
         echo "  restart  - Stop then start"
         echo "  status   - Show running state"
         echo "  logs     - Tail bot.log"
-        echo "  install  - Copy plist to ~/Library/LaunchAgents/"
+        echo "  install  - Install plist to ~/Library/LaunchAgents/"
         echo "  uninstall- Remove plist and stop bot"
         exit 1
         ;;
