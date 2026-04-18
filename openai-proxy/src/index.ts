@@ -1,5 +1,14 @@
+interface Env {
+  PROXY_SECRET: string;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const secret = request.headers.get('X-Proxy-Secret');
+    if (!secret || secret !== env.PROXY_SECRET) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
     const url = new URL(request.url);
 
     const proxyPaths = ['/v1/chat/completions', '/v1/models'];
@@ -33,10 +42,6 @@ export default {
         responseHeaders.set(key, value);
       }
     });
-
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    responseHeaders.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     return new Response(await upstreamRes.text(), {
       status: upstreamRes.status,
