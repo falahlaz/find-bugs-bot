@@ -55,8 +55,8 @@ LLM_API_KEY = _env("LLM_API_KEY")
 LLM_MODEL = _env("LLM_MODEL", "gpt-4o")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
 LLM_PROXY = os.getenv("LLM_PROXY") or None
-LLM_SKIP_SSL_VERIFY = os.getenv("LLM_SKIP_SSL_VERIFY", "true").lower() == "true"
-SPLUNK_SKIP_SSL_VERIFY = os.getenv("SPLUNK_SKIP_SSL_VERIFY", "true").lower() == "true"
+LLM_SKIP_SSL_VERIFY = os.getenv("LLM_SKIP_SSL_VERIFY", "false").lower() == "true"
+SPLUNK_SKIP_SSL_VERIFY = os.getenv("SPLUNK_SKIP_SSL_VERIFY", "false").lower() == "true"
 
 TIMEZONE = _env("TIMEZONE", "Asia/Jakarta")
 DB_PATH = _env("DB_PATH", "investigations.db")
