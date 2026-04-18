@@ -37,10 +37,19 @@ async def close_client():
         _openai_client = None
 
 
+def _redact_sensitive(text: str) -> str:
+    text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9\-_\.]+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)(authorization:\s*(?:bearer|basic|token)\s+)\S+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)(password[=:\"']\s*)\S+", r"\1[REDACTED]", text)
+    text = re.sub(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", "[EMAIL_REDACTED]", text)
+    return text
+
+
 def _sanitize_log_lines(log_lines: str, max_chars: int = 80000) -> str:
     sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", log_lines)
     sanitized = sanitized.replace("\r\n", "\n").replace("\r", "\n")
     sanitized = sanitized.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+    sanitized = _redact_sensitive(sanitized)
     if len(sanitized) > max_chars:
         sanitized = sanitized[:max_chars] + f"\n... [truncated {len(log_lines) - max_chars} chars]"
     return sanitized

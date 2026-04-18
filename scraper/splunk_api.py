@@ -62,11 +62,7 @@ class SplunkAPIClient:
             follow_redirects=False,
         )
 
-        logger.info(
-            "Splunk API client started (base_url=%s, csrf=%s...)",
-            self.base_url,
-            (self._csrf_token or "")[:20],
-        )
+        logger.info("Splunk API client started (base_url=%s, csrf=<set>)", self.base_url)
 
     def _load_session(self) -> dict | None:
         if not os.path.exists(self.session_path):
