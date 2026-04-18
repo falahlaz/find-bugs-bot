@@ -1,4 +1,5 @@
 import logging
+import re
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -21,11 +22,9 @@ MAX_TXN_ID_LEN = 128
 
 
 def _looks_like_transaction_id(text: str) -> bool:
-    if not text or len(text) > MAX_TXN_ID_LEN:
+    if not text:
         return False
-    if any(c in text for c in "\n\r\t"):
-        return False
-    return True
+    return re.fullmatch(r'[A-Za-z0-9\-_.]{1,128}', text) is not None
 
 
 def make_env_command(env_key: str):
@@ -233,6 +232,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     jq = context.bot_data.get("job_queue")
     if not jq:
         await update.message.reply_text("❌ Bot is still initializing. Please try again.")
+        return
+
+    user_job_count = 0
+    if jq.current_job and jq.current_job.get("requester_chat_id") == chat_id:
+        user_job_count += 1
+    user_job_count += sum(
+        1 for j in jq._queue if j.get("requester_chat_id") == chat_id
+    )
+    if user_job_count >= 3:
+        await update.message.reply_text(
+            "You already have 3 jobs queued. Please wait for them to complete before submitting more."
+        )
         return
 
     job = {

@@ -86,6 +86,12 @@ def parse_curl(raw: str) -> dict:
             f"Please make sure it's included."
         )
 
+    if not re.fullmatch(r'[A-Za-z0-9\-_.]{1,128}', txn_id):
+        raise CurlParseError(
+            "Transaction ID contains invalid characters. "
+            "Only alphanumeric, hyphens, underscores, and dots are allowed."
+        )
+
     pretty_headers = {}
     for key, value in headers.items():
         pretty_headers[key if key == key.lower() else key] = value
