@@ -78,9 +78,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Commands:\n"
         "/help — Show this message\n"
         "/status — Queue & bot status\n"
+        "/myid — Show your chat ID (for whitelist requests)\n"
         "/history — Last 5 investigations (engineer only)"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Report the caller's own chat ID so they can request whitelist access.
+
+    Intentionally not gated on TELEGRAM_ALLOWED_CHAT_IDS — a user needs their ID
+    before they can be whitelisted. Only ever discloses the caller's own ID.
+    """
+    chat_id = update.effective_chat.id
+    allowed = chat_id in config.TELEGRAM_ALLOWED_CHAT_IDS
+    status = "✅ already whitelisted" if allowed else "⛔️ not whitelisted yet"
+    await update.message.reply_text(
+        f"🆔 Your chat ID: `{chat_id}`\n"
+        f"Status: {status}\n\n"
+        "Send this ID to the bot engineer to get access.",
+        parse_mode="Markdown",
+    )
+    logger.info("myid requested by chat_id=%d allowed=%s", chat_id, allowed)
 
 
 async def _set_environment(update: Update, context: ContextTypes.DEFAULT_TYPE, env_key: str) -> None:
@@ -234,13 +253,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("❌ Bot is still initializing. Please try again.")
         return
 
-    user_job_count = 0
-    if jq.current_job and jq.current_job.get("requester_chat_id") == chat_id:
-        user_job_count += 1
-    user_job_count += sum(
-        1 for j in jq._queue if j.get("requester_chat_id") == chat_id
-    )
-    if user_job_count >= 3:
+    if jq.jobs_for_chat(chat_id) >= 3:
         await update.message.reply_text(
             "You already have 3 jobs queued. Please wait for them to complete before submitting more."
         )

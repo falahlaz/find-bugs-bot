@@ -9,7 +9,7 @@ from telegram.error import BadRequest
 from telegram.ext import Application, MessageHandler, filters, CommandHandler
 
 import config
-from bot.handler import help_command, status_command, history_command, handle_message, make_env_command, make_time_range_command
+from bot.handler import help_command, status_command, history_command, myid_command, handle_message, make_env_command, make_time_range_command
 from jobqueue.job_queue import job_queue
 from scraper.splunk_api import splunk_api
 from scraper.vpn_check import is_vpn_connected
@@ -303,6 +303,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("history", history_command))
+    application.add_handler(CommandHandler("myid", myid_command))
 
     for env_key in config.SPLUNK_ENVIRONMENTS:
         application.add_handler(CommandHandler(env_key, make_env_command(env_key)))
