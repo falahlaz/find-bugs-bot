@@ -21,6 +21,18 @@ class JobQueue:
             return 0
         return self._queue.qsize()
 
+    def jobs_for_chat(self, chat_id: int) -> int:
+        """Count jobs belonging to a chat: the one in flight plus those waiting."""
+        count = 0
+        if self.current_job and self.current_job.get("requester_chat_id") == chat_id:
+            count += 1
+        if self._queue is not None:
+            # asyncio.Queue keeps its pending items in a deque at _queue
+            count += sum(
+                1 for j in self._queue._queue if j.get("requester_chat_id") == chat_id
+            )
+        return count
+
     def initialize(self, bot):
         self._queue = asyncio.Queue(maxsize=10)
         self._bot = bot
