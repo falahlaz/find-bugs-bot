@@ -22,6 +22,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS investigations (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id      TEXT NOT NULL,
+            resolved_transaction_id TEXT,
             requester_chat_id   INTEGER NOT NULL,
             environment         TEXT NOT NULL DEFAULT 'prod',
             time_range          TEXT NOT NULL DEFAULT '24h',
@@ -48,6 +49,11 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    try:
+        conn.execute("ALTER TABLE investigations ADD COLUMN resolved_transaction_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", _db_path)
@@ -67,17 +73,20 @@ def _save_investigation_sync(
     raw_log_snippet: str | None = None,
     failure_reason: str | None = None,
     time_range: str = "24h",
+    resolved_transaction_id: str | None = None,
 ) -> int:
     conn = _get_conn()
     try:
         cursor = conn.execute(
             """INSERT INTO investigations
-               (transaction_id, requester_chat_id, environment, time_range, submitted_at, status,
+               (transaction_id, resolved_transaction_id, requester_chat_id, environment,
+                time_range, submitted_at, status,
                 error_type, failed_component, severity, summary,
                 likely_cause, suggested_action, raw_log_snippet, failure_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction_id,
+                resolved_transaction_id,
                 requester_chat_id,
                 environment,
                 time_range,
@@ -113,13 +122,14 @@ async def save_investigation(
     raw_log_snippet: str | None = None,
     failure_reason: str | None = None,
     time_range: str = "24h",
+    resolved_transaction_id: str | None = None,
 ) -> int:
     return await asyncio.to_thread(
         _save_investigation_sync,
         transaction_id, requester_chat_id, status,
         environment, error_type, failed_component, severity, summary,
         likely_cause, suggested_action, raw_log_snippet, failure_reason,
-        time_range,
+        time_range, resolved_transaction_id,
     )
 
 

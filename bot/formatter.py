@@ -51,6 +51,12 @@ def format_raw_log_message(
     return _split_message(text)
 
 
+def _txn_label(transaction_id: str, resolved_transaction_id: str | None) -> str:
+    if resolved_transaction_id:
+        return f"`{transaction_id}` → backend-id: `{resolved_transaction_id}`"
+    return f"`{transaction_id}`"
+
+
 def format_engineer_report(
     transaction_id: str,
     diagnosis: dict | None,
@@ -62,9 +68,11 @@ def format_engineer_report(
     status: str = "success",
     failure_reason: str | None = None,
     time_range: str = "24h",
+    resolved_transaction_id: str | None = None,
 ) -> list[str]:
     env_label = _env_display(environment)
-    header = f"🐛 Bug Report — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]"
+    txn_label = _txn_label(transaction_id, resolved_transaction_id)
+    header = f"🐛 Bug Report — transaction-id: {txn_label} [{env_label}, last {time_range}]"
 
     if status == "no_logs":
         text = (
@@ -147,8 +155,14 @@ def format_qa_report(
     llm_failed: bool = False,
     failure_reason: str | None = None,
     time_range: str = "24h",
+    resolved_transaction_id: str | None = None,
 ) -> list[str]:
     env_label = _env_display(environment)
+    backend_note = (
+        f"🔗 Backend transaction ID: `{resolved_transaction_id}`\n"
+        if resolved_transaction_id
+        else ""
+    )
 
     if status == "no_logs":
         text = (
@@ -179,6 +193,7 @@ def format_qa_report(
     if llm_failed:
         text = (
             f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
+            f"{backend_note}"
             "The engineering team is reviewing the logs manually and will follow up."
         )
         return _split_message(text)
@@ -196,6 +211,7 @@ def format_qa_report(
 
     text = (
         f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
+        f"{backend_note}"
         f"{severity_emoji.get(sev, '❓')} Severity: {sev.title()}\n"
         f"🔧 Error source: {source_label}\n"
         f"📍 Component: {_escape_markdown(d.get('failed_component', '—'))}\n"

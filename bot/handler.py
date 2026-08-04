@@ -1,10 +1,10 @@
 import logging
-import re
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
+from parser.validation import is_valid_transaction_id
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +18,8 @@ def _env_display(env_key: str) -> str:
     return ENV_DISPLAY_NAMES.get(env_key, env_key)
 
 
-MAX_TXN_ID_LEN = 128
-
-
 def _looks_like_transaction_id(text: str) -> bool:
-    if not text:
-        return False
-    return re.fullmatch(r'[A-Za-z0-9\-_.]{1,128}', text) is not None
+    return is_valid_transaction_id(text)
 
 
 def make_env_command(env_key: str):

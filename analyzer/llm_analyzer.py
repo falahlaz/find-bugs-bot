@@ -118,12 +118,24 @@ class LLMAnalysisError(Exception):
     pass
 
 
-async def analyze(transaction_id: str, log_lines: str) -> dict:
+async def analyze(
+    transaction_id: str, log_lines: str, resolved_transaction_id: str | None = None
+) -> dict:
     _, client = _get_client()
+
+    if resolved_transaction_id:
+        # The logs are keyed on the backend-generated id, not the one the client
+        # sent — say so, or the model reports the ids as a mismatch.
+        txn_display = (
+            f"{resolved_transaction_id} "
+            f"(backend-generated id for client transaction ID {transaction_id})"
+        )
+    else:
+        txn_display = transaction_id
 
     sanitized_logs = _sanitize_log_lines(log_lines)
     user_prompt = USER_PROMPT_TEMPLATE.format(
-        transaction_id=transaction_id,
+        transaction_id=txn_display,
         log_lines=sanitized_logs,
     )
 

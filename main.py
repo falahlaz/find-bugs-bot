@@ -96,7 +96,9 @@ async def process_job(job: dict, bot):
                 )
                 return
 
-        result_status, log_data = await scrape_splunk(transaction_id, environment, time_range)
+        result_status, log_data, resolved_id = await scrape_splunk(
+            transaction_id, environment, time_range
+        )
 
         if result_status == "session_expired":
             logging.error("Splunk session expired, attempting auto re-auth")
@@ -192,7 +194,7 @@ async def process_job(job: dict, bot):
         llm_raw_text = None
 
         try:
-            diagnosis = await analyze(transaction_id, log_data)
+            diagnosis = await analyze(transaction_id, log_data, resolved_id)
             logging.info("LLM analysis complete for transaction_id=%s environment=%s", transaction_id, environment)
         except LLMAnalysisError as e:
             llm_failed = True
@@ -212,6 +214,7 @@ async def process_job(job: dict, bot):
             llm_raw_text=llm_raw_text,
             status="success" if not llm_failed else "failed",
             time_range=time_range,
+            resolved_transaction_id=resolved_id,
         )
         qa_msgs = format_qa_report(
             transaction_id=transaction_id,
@@ -220,6 +223,7 @@ async def process_job(job: dict, bot):
             status="success" if not llm_failed else "failed",
             llm_failed=llm_failed,
             time_range=time_range,
+            resolved_transaction_id=resolved_id,
         )
 
         for msg in eng_msgs:
@@ -241,6 +245,7 @@ async def process_job(job: dict, bot):
             raw_log_snippet=log_data,
             failure_reason="LLM analysis failed" if llm_failed else None,
             time_range=time_range,
+            resolved_transaction_id=resolved_id,
         )
 
     except Exception:

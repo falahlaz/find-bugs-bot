@@ -1,8 +1,8 @@
 import shlex
-import re
 import logging
 
 import config
+from parser.validation import is_valid_transaction_id
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def parse_curl(raw: str) -> dict:
             f"Please make sure it's included."
         )
 
-    if not re.fullmatch(r'[A-Za-z0-9\-_.]{1,128}', txn_id):
+    if not is_valid_transaction_id(txn_id):
         raise CurlParseError(
             "Transaction ID contains invalid characters. "
             "Only alphanumeric, hyphens, underscores, and dots are allowed."
