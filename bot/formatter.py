@@ -31,6 +31,49 @@ def _env_display(env_key: str) -> str:
     return ENV_DISPLAY_NAMES.get(env_key, env_key)
 
 
+ERROR_HINTS = ("error", "exception", "fail", "timeout", '"err"')
+
+MAX_EXACT_LOG_LEN = 800
+
+
+def pick_exact_log(
+    diagnosis: dict | None, raw_log_snippet: str | None
+) -> str | None:
+    """The single most relevant verbatim log line, for the QA-facing report.
+
+    Prefers the first line the LLM flagged in `relevant_logs`; falls back to the
+    last error-looking raw line so QA still sees real log text when the LLM
+    returns nothing useful.
+    """
+    for line in (diagnosis or {}).get("relevant_logs") or []:
+        if isinstance(line, str) and line.strip():
+            return _format_exact_log(line)
+
+    lines = [line for line in (raw_log_snippet or "").splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(hint in lowered for hint in ERROR_HINTS):
+            return _format_exact_log(line)
+
+    return _format_exact_log(lines[-1])
+
+
+def _format_exact_log(line: str) -> str:
+    collapsed = " ".join(line.split())
+    if len(collapsed) > MAX_EXACT_LOG_LEN:
+        collapsed = collapsed[:MAX_EXACT_LOG_LEN] + "..."
+    return _sanitize_code_block(collapsed)
+
+
+def _exact_log_block(exact_log: str | None) -> str:
+    if not exact_log:
+        return ""
+    return f"📄 Exact log:\n```\n{exact_log}\n```\n"
+
+
 def _now_formatted() -> str:
     tz = ZoneInfo(config.TIMEZONE)
     now = datetime.now(timezone.utc).astimezone(tz)
@@ -81,7 +124,7 @@ def format_engineer_report(
             "📭 No logs found\n\n"
             f"No logs were found in Splunk for transaction ID `{transaction_id}` in **{env_label}**.\n"
             "The ID may be incorrect or the logs may have rolled off.\n\n"
-            f"👤 Reported by: chat_id {requester_chat_id}\n"
+            f"👤 Reported by: {config.chat_name(requester_chat_id)} (chat_id {requester_chat_id})\n"
             f"🕐 Queried at: {_now_formatted()}"
         )
         return _split_message(text)
@@ -97,7 +140,7 @@ def format_engineer_report(
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
             text += f"⚠️ Last ~3000 chars of logs:\n```\n{_sanitize_code_block(snippet)}\n```\n\n"
-        text += f"👤 Reported by: chat_id {requester_chat_id}\n"
+        text += f"👤 Reported by: {config.chat_name(requester_chat_id)} (chat_id {requester_chat_id})\n"
         text += f"🕐 Queried at: {_now_formatted()}"
         return _split_message(text)
 
@@ -114,7 +157,7 @@ def format_engineer_report(
         if raw_log_snippet:
             snippet = raw_log_snippet[-3000:] if len(raw_log_snippet) > 3000 else raw_log_snippet
             text += f"📄 Raw logs (last ~3000 chars):\n```\n{_sanitize_code_block(snippet)}\n```\n\n"
-        text += f"👤 Reported by: chat_id {requester_chat_id}\n"
+        text += f"👤 Reported by: {config.chat_name(requester_chat_id)} (chat_id {requester_chat_id})\n"
         text += f"🕐 Queried at: {_now_formatted()}"
         return _split_message(text)
 
@@ -140,7 +183,7 @@ def format_engineer_report(
 
     text += (
         f"📋 Summary:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
-        f"👤 Reported by: chat_id {requester_chat_id}\n"
+        f"👤 Reported by: {config.chat_name(requester_chat_id)} (chat_id {requester_chat_id})\n"
         f"🕐 Queried at: {_now_formatted()}"
     )
 
@@ -156,6 +199,7 @@ def format_qa_report(
     failure_reason: str | None = None,
     time_range: str = "24h",
     resolved_transaction_id: str | None = None,
+    exact_log: str | None = None,
 ) -> list[str]:
     env_label = _env_display(environment)
     backend_note = (
@@ -168,7 +212,20 @@ def format_qa_report(
         text = (
             f"📭 No logs found for transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
             "No logs were found in Splunk for your transaction ID. "
-            "The engineering team has been notified and may follow up."
+            "The ID may be wrong or the logs may have rolled off.\n\n"
+            "📌 Assign a developer below if you want them to take a look."
+        )
+        return _split_message(text)
+
+    # Checked before `status == "failed"` — the caller passes both flags when the
+    # LLM fails, and this branch is the more specific (and more useful) one.
+    if llm_failed:
+        text = (
+            f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
+            f"{backend_note}"
+            f"{_exact_log_block(exact_log)}\n"
+            "⚠️ Automatic analysis was unavailable, so there is no diagnosis this time.\n"
+            "📌 Assign a developer below — they get the full logs."
         )
         return _split_message(text)
 
@@ -190,31 +247,24 @@ def format_qa_report(
             )
         return _split_message(text)
 
-    if llm_failed:
-        text = (
-            f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
-            f"{backend_note}"
-            "The engineering team is reviewing the logs manually and will follow up."
-        )
-        return _split_message(text)
-
     d = diagnosis or {}
     severity_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}
     sev = d.get("severity", "unknown").lower()
     error_source = d.get("error_source", "unknown").lower()
     source_label = {"esb": "ESB (External)", "tibco": "TIBCO (External)", "internal": "Internal"}.get(error_source, "Unknown")
     source_action = {
-        "esb": "This is an external dependency error — no action needed from your side. The team is monitoring for resolution.",
-        "tibco": "This is an external dependency error — no action needed from your side. The team is monitoring for resolution.",
-        "internal": "This is an internal service error — please escalate to the development team.",
-    }.get(error_source, "The engineering team has been notified and is looking into it.")
+        "esb": "External dependency error — assign a developer below if it needs follow-up.",
+        "tibco": "External dependency error — assign a developer below if it needs follow-up.",
+        "internal": "Internal service error — assign a developer below to escalate it.",
+    }.get(error_source, "Assign a developer below to take a closer look.")
 
     text = (
         f"✅ Investigation complete — transaction-id: `{transaction_id}` [{env_label}, last {time_range}]\n\n"
         f"{backend_note}"
         f"{severity_emoji.get(sev, '❓')} Severity: {sev.title()}\n"
         f"🔧 Error source: {source_label}\n"
-        f"📍 Component: {_escape_markdown(d.get('failed_component', '—'))}\n"
+        f"📍 Component: {_escape_markdown(d.get('failed_component', '—'))}\n\n"
+        f"{_exact_log_block(exact_log)}\n"
         f"📋 What happened:\n{_escape_markdown(d.get('summary', '—'))}\n\n"
         f"📌 {source_action}"
     )

@@ -1,5 +1,6 @@
 import sqlite3
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -35,7 +36,9 @@ def init_db():
             likely_cause        TEXT,
             suggested_action    TEXT,
             raw_log_snippet     TEXT,
-            failure_reason      TEXT
+            failure_reason      TEXT,
+            engineer_report     TEXT,
+            assigned_to         TEXT
         )
     """)
 
@@ -51,6 +54,16 @@ def init_db():
 
     try:
         conn.execute("ALTER TABLE investigations ADD COLUMN resolved_transaction_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE investigations ADD COLUMN engineer_report TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE investigations ADD COLUMN assigned_to TEXT")
     except sqlite3.OperationalError:
         pass
 
@@ -74,6 +87,7 @@ def _save_investigation_sync(
     failure_reason: str | None = None,
     time_range: str = "24h",
     resolved_transaction_id: str | None = None,
+    engineer_report: str | None = None,
 ) -> int:
     conn = _get_conn()
     try:
@@ -82,8 +96,9 @@ def _save_investigation_sync(
                (transaction_id, resolved_transaction_id, requester_chat_id, environment,
                 time_range, submitted_at, status,
                 error_type, failed_component, severity, summary,
-                likely_cause, suggested_action, raw_log_snippet, failure_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                likely_cause, suggested_action, raw_log_snippet, failure_reason,
+                engineer_report)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction_id,
                 resolved_transaction_id,
@@ -100,6 +115,7 @@ def _save_investigation_sync(
                 suggested_action,
                 raw_log_snippet[:2000] if raw_log_snippet else None,
                 failure_reason,
+                engineer_report,
             ),
         )
         conn.commit()
@@ -123,13 +139,14 @@ async def save_investigation(
     failure_reason: str | None = None,
     time_range: str = "24h",
     resolved_transaction_id: str | None = None,
+    engineer_report: str | None = None,
 ) -> int:
     return await asyncio.to_thread(
         _save_investigation_sync,
         transaction_id, requester_chat_id, status,
         environment, error_type, failed_component, severity, summary,
         likely_cause, suggested_action, raw_log_snippet, failure_reason,
-        time_range, resolved_transaction_id,
+        time_range, resolved_transaction_id, engineer_report,
     )
 
 
@@ -163,3 +180,55 @@ def _get_by_transaction_id_sync(transaction_id: str) -> dict | None:
 
 async def get_by_transaction_id(transaction_id: str) -> dict | None:
     return await asyncio.to_thread(_get_by_transaction_id_sync, transaction_id)
+
+
+def _get_by_id_sync(investigation_id: int) -> dict | None:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM investigations WHERE id = ?",
+            (investigation_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+async def get_by_id(investigation_id: int) -> dict | None:
+    return await asyncio.to_thread(_get_by_id_sync, investigation_id)
+
+
+def _add_assignees_sync(investigation_id: int, chat_ids: list[int]) -> list[int]:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT assigned_to FROM investigations WHERE id = ?",
+            (investigation_id,),
+        ).fetchone()
+        if row is None:
+            return []
+
+        try:
+            existing = json.loads(row["assigned_to"]) if row["assigned_to"] else []
+        except json.JSONDecodeError:
+            logger.warning("Corrupt assigned_to for investigation id=%d, resetting", investigation_id)
+            existing = []
+
+        merged = list(existing)
+        for chat_id in chat_ids:
+            if chat_id not in merged:
+                merged.append(chat_id)
+
+        conn.execute(
+            "UPDATE investigations SET assigned_to = ? WHERE id = ?",
+            (json.dumps(merged), investigation_id),
+        )
+        conn.commit()
+        return merged
+    finally:
+        conn.close()
+
+
+async def add_assignees(investigation_id: int, chat_ids: list[int]) -> list[int]:
+    """Merge chat_ids into the investigation's assignee list, returning the full list."""
+    return await asyncio.to_thread(_add_assignees_sync, investigation_id, chat_ids)

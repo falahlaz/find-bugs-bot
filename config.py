@@ -25,13 +25,34 @@ def _env_json(key: str, default: dict | None = None) -> dict:
     return json.loads(value)
 
 
+def _env_roster(key: str) -> dict[int, str]:
+    """Parse a {"chat_id": "Display Name"} JSON map into {int: str}."""
+    return {int(chat_id): str(name) for chat_id, name in _env_json(key).items()}
+
+
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
+# Admin chat — operational alerts only (VPN down, session expired, crashes).
+# Bug reports reach developers through QA assignment, not this chat.
 TELEGRAM_YOUR_CHAT_ID = int(_env("TELEGRAM_YOUR_CHAT_ID"))
-TELEGRAM_ALLOWED_CHAT_IDS = {
-    int(cid.strip())
-    for cid in _env("TELEGRAM_ALLOWED_CHAT_IDS").split(",")
-    if cid.strip()
-}
+TELEGRAM_DEVELOPERS = _env_roster("TELEGRAM_DEVELOPERS")
+TELEGRAM_QA = _env_roster("TELEGRAM_QA")
+TELEGRAM_ALLOWED_CHAT_IDS = set(TELEGRAM_DEVELOPERS) | set(TELEGRAM_QA)
+
+
+def chat_name(chat_id: int) -> str:
+    return (
+        TELEGRAM_DEVELOPERS.get(chat_id)
+        or TELEGRAM_QA.get(chat_id)
+        or f"chat_id {chat_id}"
+    )
+
+
+def chat_role(chat_id: int) -> str | None:
+    if chat_id in TELEGRAM_DEVELOPERS:
+        return "developer"
+    if chat_id in TELEGRAM_QA:
+        return "QA"
+    return None
 
 SPLUNK_URL = _env("SPLUNK_URL")
 SPLUNK_SPL_TEMPLATES = _env_json("SPLUNK_SPL_TEMPLATES")

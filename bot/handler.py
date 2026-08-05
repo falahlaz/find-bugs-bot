@@ -69,12 +69,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "The bot will:\n"
         " • Search Splunk for logs in the selected environment\n"
         " • Analyze with AI\n"
-        " • Send you a diagnosis\n\n"
+        " • Send you a diagnosis with the exact log line\n\n"
+        "4. Pick the developer(s) on the report's buttons and press "
+        "*📤 Send report* — only then do they receive the full report.\n\n"
         "Commands:\n"
         "/help — Show this message\n"
         "/status — Queue & bot status\n"
         "/myid — Show your chat ID (for whitelist requests)\n"
-        "/history — Last 5 investigations (engineer only)"
+        "/history — Last 5 investigations (developers only)"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -86,15 +88,18 @@ async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     before they can be whitelisted. Only ever discloses the caller's own ID.
     """
     chat_id = update.effective_chat.id
-    allowed = chat_id in config.TELEGRAM_ALLOWED_CHAT_IDS
-    status = "✅ already whitelisted" if allowed else "⛔️ not whitelisted yet"
+    role = config.chat_role(chat_id)
+    if role:
+        status = f"✅ registered as {role} ({config.chat_name(chat_id)})"
+    else:
+        status = "⛔️ not whitelisted yet"
     await update.message.reply_text(
         f"🆔 Your chat ID: `{chat_id}`\n"
         f"Status: {status}\n\n"
         "Send this ID to the bot engineer to get access.",
         parse_mode="Markdown",
     )
-    logger.info("myid requested by chat_id=%d allowed=%s", chat_id, allowed)
+    logger.info("myid requested by chat_id=%d role=%s", chat_id, role)
 
 
 async def _set_environment(update: Update, context: ContextTypes.DEFAULT_TYPE, env_key: str) -> None:
@@ -149,7 +154,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_chat.id != config.TELEGRAM_YOUR_CHAT_ID:
+    chat_id = update.effective_chat.id
+    if chat_id != config.TELEGRAM_YOUR_CHAT_ID and chat_id not in config.TELEGRAM_DEVELOPERS:
         await update.message.reply_text("⛔ This command is for the engineering team only.")
         return
 

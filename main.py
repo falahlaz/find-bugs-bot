@@ -1,31 +1,36 @@
 import asyncio
+import json
 import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
 
 from telegram import Update
-from telegram.error import BadRequest
-from telegram.ext import Application, MessageHandler, filters, CommandHandler
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler
 
 import config
+from bot.assign import build_assign_keyboard, handle_assign_callback, CALLBACK_PATTERN
 from bot.handler import help_command, status_command, history_command, myid_command, handle_message, make_env_command, make_time_range_command
+from bot.messaging import send_message_safe
 from jobqueue.job_queue import job_queue
 from scraper.splunk_api import splunk_api
 from scraper.vpn_check import is_vpn_connected
 from scraper.splunk_scraper import scrape_splunk
 from analyzer.llm_analyzer import analyze, LLMAnalysisError, close_client
-from bot.formatter import format_engineer_report, format_qa_report
+from bot.formatter import format_engineer_report, format_qa_report, pick_exact_log
 from storage.database import save_investigation
 
 shutting_down = False
 
 
-async def send_message_safe(bot, chat_id: int, text: str, parse_mode: str = "Markdown", **kwargs):
-    try:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode, **kwargs)
-    except BadRequest:
-        await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+async def send_qa_report(bot, chat_id: int, messages: list[str], investigation_id: int) -> None:
+    """Send the QA card, with the developer-assignment keyboard on the last chunk."""
+    for i, msg in enumerate(messages):
+        is_last = i == len(messages) - 1
+        await send_message_safe(
+            bot, chat_id, text=msg,
+            reply_markup=build_assign_keyboard(investigation_id) if is_last else None,
+        )
 
 
 def setup_logging():
@@ -160,18 +165,16 @@ async def process_job(job: dict, bot):
                 status="no_logs",
                 time_range=time_range,
             )
-            for msg in eng_msgs:
-                await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
-            for msg in qa_msgs:
-                await send_message_safe(bot, requester_chat_id, text=msg)
-            await save_investigation(
+            investigation_id = await save_investigation(
                 transaction_id=transaction_id,
                 requester_chat_id=requester_chat_id,
                 environment=environment,
                 status="no_logs",
                 raw_log_snippet=log_data,
                 time_range=time_range,
+                engineer_report=json.dumps(eng_msgs),
             )
+            await send_qa_report(bot, requester_chat_id, qa_msgs, investigation_id)
             return
 
         if result_status not in ("success",):
@@ -224,14 +227,10 @@ async def process_job(job: dict, bot):
             llm_failed=llm_failed,
             time_range=time_range,
             resolved_transaction_id=resolved_id,
+            exact_log=pick_exact_log(diagnosis, log_data),
         )
 
-        for msg in eng_msgs:
-            await send_message_safe(bot, config.TELEGRAM_YOUR_CHAT_ID, text=msg)
-        for msg in qa_msgs:
-            await send_message_safe(bot, requester_chat_id, text=msg)
-
-        await save_investigation(
+        investigation_id = await save_investigation(
             transaction_id=transaction_id,
             requester_chat_id=requester_chat_id,
             environment=environment,
@@ -246,7 +245,10 @@ async def process_job(job: dict, bot):
             failure_reason="LLM analysis failed" if llm_failed else None,
             time_range=time_range,
             resolved_transaction_id=resolved_id,
+            engineer_report=json.dumps(eng_msgs),
         )
+
+        await send_qa_report(bot, requester_chat_id, qa_msgs, investigation_id)
 
     except Exception:
         logging.exception("Unhandled error processing job for transaction_id=%s", transaction_id)
@@ -315,6 +317,8 @@ def main():
 
     for tr_key in config.SPLUNK_TIME_RANGES:
         application.add_handler(CommandHandler(tr_key, make_time_range_command(tr_key)))
+
+    application.add_handler(CallbackQueryHandler(handle_assign_callback, pattern=CALLBACK_PATTERN))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

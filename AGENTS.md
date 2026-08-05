@@ -34,7 +34,8 @@ No test suite, no linter, no type checker configured.
 
 - **Entry point**: `main.py` — wires Telegram handlers, asyncio job queue, and the processing pipeline.
 - **Config**: `config.py` — loads `.env` via `python-dotenv`, exposes typed module-level constants. All env vars are required unless noted in `.env.example`.
-- **Pipeline**: Telegram message → `parser/curl_parser.py` (extract transaction ID) → `jobqueue/job_queue.py` (FIFO, max 10) → `scraper/splunk_scraper.py` (search, then optionally re-search on the backend ID resolved by `scraper/correlation.py`) → `scraper/splunk_api.py` (Splunk REST API via httpx) → `analyzer/llm_analyzer.py` (OpenAI) → `bot/formatter.py` (dual delivery: engineer gets full report, QA gets summary) → `storage/database.py` (SQLite).
+- **Pipeline**: Telegram message → `parser/curl_parser.py` (extract transaction ID) → `jobqueue/job_queue.py` (FIFO, max 10) → `scraper/splunk_scraper.py` (search, then optionally re-search on the backend ID resolved by `scraper/correlation.py`) → `scraper/splunk_api.py` (Splunk REST API via httpx) → `analyzer/llm_analyzer.py` (OpenAI) → `bot/formatter.py` → `storage/database.py` (SQLite) → QA gets the summary + exact log line + assignment keyboard.
+- **Delivery is QA-driven**: the full engineer report is *stored*, not sent. `bot/assign.py` renders an inline keyboard of named developers; only when QA taps names and presses "Send report" does `handle_assign_callback` deliver the stored report. `TELEGRAM_YOUR_CHAT_ID` is the admin chat and receives operational alerts only.
 
 ## Key conventions
 
@@ -74,6 +75,7 @@ IDs discovered this way never pass a user-input boundary, so they are re-validat
 
 - **VPN required at runtime** — the bot TCP-probes `VPN_CHECK_HOST` before each Splunk query. Jobs retry 3× with 60s delays if VPN is down.
 - **Splunk session cookies expire** — the bot auto-re-authenticates when session expiry is detected. If auto re-auth fails, run `python save_session_auto.py` to manually refresh.
+- **`TELEGRAM_DEVELOPERS` / `TELEGRAM_QA` in `.env`** are single-line JSON maps of `chat_id` → display name (parsed by `config._env_roster`). `TELEGRAM_ALLOWED_CHAT_IDS` is now *derived* — the union of both — and is no longer an env var. Adding someone still requires a bot restart.
 - **`SPLUNK_SPL_TEMPLATES` in `.env`** is a JSON string on a single line — `config.py` parses it with `json.loads()`. Environments are dynamically registered as Telegram commands from the keys of this dict.
 - **`LLM_SKIP_SSL_VERIFY`** defaults to `true` (corporate VPN/proxy environment).
 - **SQLite database** (`investigations.db`) is gitignored and created at runtime.
@@ -83,7 +85,7 @@ IDs discovered this way never pass a user-input boundary, so they are re-validat
 
 | Path | Purpose |
 |---|---|
-| `bot/` | Telegram message handlers and report formatters |
+| `bot/` | Telegram message handlers, report formatters, assignment keyboard (`assign.py`) |
 | `parser/` | Curl command parser (extracts headers, URL, method) |
 | `jobqueue/` | Asyncio FIFO queue with graceful drain on shutdown |
 | `scraper/` | Splunk API client (`splunk_api.py`), VPN check, legacy browser manager |

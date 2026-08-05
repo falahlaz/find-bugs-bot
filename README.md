@@ -1,6 +1,6 @@
 # Debug Bot — Telegram Splunk Debugging Bot **v2.0.0**
 
-A Telegram bot that accepts curl snippets from QA, searches Splunk automatically (across multiple environments), and delivers an AI-summarized diagnosis to you on Telegram.
+A Telegram bot that accepts curl snippets from QA, searches Splunk automatically (across multiple environments), and delivers an AI-summarized diagnosis on Telegram. QA gets the summary plus the exact log line, then assigns the full technical report to one or more named developers from an inline keyboard.
 
 ## Requirements
 
@@ -22,7 +22,10 @@ A Telegram bot that accepts curl snippets from QA, searches Splunk automatically
 1. Send a message to your bot
 2. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
 3. Find `"chat":{"id": <YOUR_CHAT_ID>}` in the response
-4. Repeat for each QA member who needs access
+4. Repeat for each QA member and developer who needs access — or have them send `/myid` to the bot
+
+Every chat ID needs a name and a role: QA members submit transaction IDs, developers appear on the
+assignment keyboard. A chat ID can be in both rosters.
 
 ### 3. Configure Environment
 
@@ -36,7 +39,9 @@ Edit `.env` with your values:
 # Telegram
 TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
 TELEGRAM_YOUR_CHAT_ID=your_personal_chat_id
-TELEGRAM_ALLOWED_CHAT_IDS=chat_id_1,chat_id_2,chat_id_3
+# Named rosters — JSON maps of chat_id -> display name, on a single line.
+TELEGRAM_DEVELOPERS={"11111":"Falah","22222":"Budi"}
+TELEGRAM_QA={"33333":"Rina","44444":"Adit"}
 
 # Splunk
 SPLUNK_URL=https://your-splunk-instance.example.com
@@ -67,8 +72,9 @@ DB_PATH=investigations.db
 | Variable | Description |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `TELEGRAM_YOUR_CHAT_ID` | Your chat ID (receives full technical reports) |
-| `TELEGRAM_ALLOWED_CHAT_IDS` | Comma-separated chat IDs allowed to submit curls |
+| `TELEGRAM_YOUR_CHAT_ID` | Admin chat ID — operational alerts only (VPN down, session expired, crashes). Does **not** receive bug reports |
+| `TELEGRAM_DEVELOPERS` | JSON map of `chat_id` → name. These names fill the assignment keyboard and receive the full report once assigned |
+| `TELEGRAM_QA` | JSON map of `chat_id` → name. QA submits transaction IDs and assigns reports |
 | `SPLUNK_URL` | Base URL of your Splunk instance |
 | `SPLUNK_SPL_TEMPLATES` | JSON mapping of environment names to SPL query templates with `{transaction_id}` placeholder |
 | `SPLUNK_SESSION_PATH` | Path to saved session file (default: `splunk_session.json`) |
@@ -216,7 +222,20 @@ The bot will:
 2. Check VPN connectivity
 3. Search Splunk for logs using the environment-specific index
 4. Send logs to OpenAI for analysis
-5. Deliver a diagnosis card to you and a summary to QA
+5. Deliver a summary card to QA — severity, component, the exact log line, and an assignment keyboard
+
+### Assigning a report
+
+The QA card carries one button per developer plus **📤 Send report** and **✖️ Skip**:
+
+1. Tap developer names to toggle them (`⬜` → `✅`); the Send button shows how many are selected
+2. Tap **📤 Send report** — each selected developer receives the full technical report with an
+   "Assigned by" footer, and their button becomes `✔️`
+3. QA gets a confirmation line, and can assign more developers later from the same message
+4. Already-assigned developers cannot be double-sent; **✖️ Skip** just removes the keyboard
+
+The buttons keep working after a bot restart — the selection lives in the keyboard and the
+assignment history in the `assigned_to` DB column.
 
 ### Commands
 
@@ -228,7 +247,8 @@ The bot will:
 | `/uat` | Anyone (allowlisted) | Set environment to UAT |
 | `/help` | Anyone (allowlisted) | Show usage instructions |
 | `/status` | Anyone (allowlisted) | Show queue depth, VPN status, session age |
-| `/history` | Engineer only | Show last 5 investigations |
+| `/myid` | Anyone | Show your own chat ID, name and role |
+| `/history` | Developers + admin | Show last 5 investigations |
 
 ## Architecture
 
@@ -269,18 +289,27 @@ QA selects env (/prod, /dev, etc.)
          │ structured diagnosis
          ▼
 ┌─────────────────────┐
-│   Report Formatter  │
-│   + Dual Delivery   │──────▶ QA: simplified summary [dev]
-│   + SQLite Writer    │──────▶ You: full technical report [prod]
+│   Report Formatter  │──────▶ QA: summary + exact log line + assign keyboard
+│   + SQLite Writer   │        (full report stored, not yet sent)
 └────────┬────────────┘
          │
          ▼
    investigations.db  (local SQLite)
+         │
+         │  QA taps developer name(s) → 📤 Send report
+         ▼
+┌─────────────────────┐
+│  Assignment Handler │──────▶ Selected developers: full technical report
+│  (callback query)   │──────▶ QA: "📤 Report sent to: …"
+└─────────────────────┘
 ```
 
 ## Error Handling
 
-| Scenario | Engineer gets | QA gets |
+"Engineer gets" below means the **admin** chat (`TELEGRAM_YOUR_CHAT_ID`) for operational alerts.
+Bug reports only reach developers after QA assigns them.
+
+| Scenario | Admin gets | QA gets |
 |---|---|---|
 | No environment selected | — | "⚠️ Please select an environment first: /prod, /dev, /staging, /uat" |
 | Invalid curl | — | Error message with format hint |
@@ -288,8 +317,9 @@ QA selects env (/prod, /dev, etc.)
 | Queue full (10 jobs) | — | "Bot is busy, please retry" |
 | VPN down (3 retries) | "❌ Job abandoned after 3 VPN retries" | "Investigation failed — VPN issue" |
 | Splunk session expired | "🔐 Session expired. Auto-re-authenticating..." | "Investigation paused" |
-| No logs found | "No logs found for transaction ID [env]" | "No logs found" |
-| LLM API error | Raw logs (truncated 3000 chars) + error note | "Engineer is reviewing" |
+| No logs found | — | "No logs found" + assign keyboard |
+| LLM API error | — | Exact log line + "no diagnosis this time" + assign keyboard (assignee gets raw logs, truncated 3000 chars) |
+| Developer never `/start`-ed the bot | — | "⚠️ Could not reach <name> — they need to press /start first" |
 | Browser crash | "🚨 Browser crashed. Restart the bot." | "Technical issue on our end" |
 
 ## Graceful Shutdown
@@ -323,6 +353,8 @@ bugs-bot/
 │
 ├── bot/
 │   ├── handler.py           # Telegram message handlers
+│   ├── assign.py            # Assignment keyboard + callback (QA → developers)
+│   ├── messaging.py         # send_message_safe (Markdown with plain-text fallback)
 │   └── formatter.py         # Engineer + QA report formatting
 │
 ├── parser/
